@@ -55,3 +55,7 @@ Thumbs.db
 # 臨時檔案
 *.tmp
 *.bak
+
+# Node.js / 前端
+node_modules/
+frontend/dist/

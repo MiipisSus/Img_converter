@@ -1,0 +1,167 @@
+@import "tailwindcss";
+
+/* Safe Area 支援 */
+:root {
+  --sat: env(safe-area-inset-top);
+  --sab: env(safe-area-inset-bottom);
+  --sal: env(safe-area-inset-left);
+  --sar: env(safe-area-inset-right);
+}
+
+/* 全域樣式 - iOS 最佳化 */
+html {
+  -webkit-tap-highlight-color: transparent;
+  -webkit-text-size-adjust: 100%;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  @apply bg-slate-950 text-slate-100 antialiased;
+  margin: 0;
+  min-height: 100vh;
+  min-height: 100dvh;
+  overscroll-behavior: none;
+}
+
+/* 禁止選取（提升 App 體驗） */
+.no-select {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+/* 移除所有輸入框預設樣式 */
+input,
+textarea,
+select {
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  appearance: none;
+  border-radius: 0;
+  outline: none;
+}
+
+input:focus,
+textarea:focus,
+select:focus {
+  outline: none;
+}
+
+/* 拖放區域樣式 */
+.drop-zone {
+  @apply border-2 border-dashed border-slate-700 rounded-2xl
+         transition-all duration-200 ease-in-out
+         bg-slate-900/30;
+}
+
+.drop-zone.active {
+  @apply border-blue-500 bg-blue-500/10 scale-[1.02];
+}
+
+/* 按鈕樣式 - 確保點擊區域至少 44x44px */
+.btn-primary {
+  @apply px-6 py-3 bg-blue-600 hover:bg-blue-500
+         text-white font-medium rounded-xl
+         transition-all duration-200
+         active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed;
+  min-height: 48px;
+}
+
+.btn-secondary {
+  @apply px-6 py-3 bg-slate-800 hover:bg-slate-700
+         text-white font-medium rounded-xl
+         transition-all duration-200
+         active:scale-[0.98];
+  min-height: 48px;
+}
+
+/* 載入動畫 */
+.loading-spinner {
+  @apply animate-spin rounded-full border-2 border-slate-700 border-t-blue-500;
+}
+
+/* 滾動條美化 */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  @apply bg-transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  @apply bg-slate-700 rounded-full;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  @apply bg-slate-600;
+}
+
+/* react-advanced-cropper 樣式覆蓋 */
+.advanced-cropper {
+  background: transparent !important;
+}
+
+.advanced-cropper-background {
+  background: #020617 !important;
+}
+
+/* 滑桿樣式 */
+input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent;
+  cursor: pointer;
+}
+
+input[type="range"]::-webkit-slider-runnable-track {
+  height: 6px;
+  border-radius: 9999px;
+  background: #334155;
+}
+
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: white;
+  margin-top: -9px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+input[type="range"]::-moz-range-track {
+  height: 6px;
+  border-radius: 9999px;
+  background: #334155;
+}
+
+input[type="range"]::-moz-range-thumb {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: white;
+  border: none;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+/* 防止 iOS Safari 彈跳效果 */
+html,
+body {
+  position: fixed;
+  overflow: hidden;
+  width: 100%;
+  height: 100%;
+}
+
+#root {
+  position: fixed;
+  overflow: hidden;
+  width: 100%;
+  height: 100%;
+  top: 0;
+  left: 0;
+}
