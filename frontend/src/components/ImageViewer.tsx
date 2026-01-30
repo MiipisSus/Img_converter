@@ -16,6 +16,7 @@ interface ImageViewerProps {
   imageSrc: string;
   rotation: number;
   mode: ViewMode;
+  initialCropCoordinates?: CropCoordinates | null;
   onCropChange?: (coordinates: CropCoordinates | null) => void;
 }
 
@@ -23,10 +24,12 @@ export function ImageViewer({
   imageSrc,
   rotation,
   mode,
+  initialCropCoordinates,
   onCropChange,
 }: ImageViewerProps) {
   const cropperRef = useRef<CropperRef>(null);
   const [imageLoaded, setImageLoaded] = useState(false);
+  const prevRotationRef = useRef(rotation);
 
   // 當裁切區域變更時觸發
   const handleCropChange = useCallback(() => {
@@ -44,44 +47,67 @@ export function ImageViewer({
     }
   }, [onCropChange]);
 
-  // 當旋轉角度變化時重新渲染 cropper
+  // 當旋轉角度變化時，使用 cropper 的內建 rotate 方法
   useEffect(() => {
     const cropper = cropperRef.current;
     if (cropper && mode === 'crop') {
-      cropper.refresh();
+      const delta = rotation - prevRotationRef.current;
+      if (delta !== 0) {
+        // 使用 cropper 的內建旋轉功能，只旋轉圖片不旋轉裁切框
+        cropper.rotateImage(delta);
+      }
     }
+    prevRotationRef.current = rotation;
   }, [rotation, mode]);
 
   // 重置圖片載入狀態
   useEffect(() => {
     setImageLoaded(false);
+    prevRotationRef.current = 0;
   }, [imageSrc]);
+
+  // 當進入裁切模式時，應用初始旋轉和裁切座標
+  useEffect(() => {
+    const cropper = cropperRef.current;
+    if (cropper && mode === 'crop') {
+      // 延遲執行以確保 cropper 已初始化
+      const timer = setTimeout(() => {
+        // 應用初始旋轉
+        if (rotation !== 0) {
+          cropper.rotateImage(rotation);
+          prevRotationRef.current = rotation;
+        }
+        // 應用初始裁切座標
+        if (initialCropCoordinates) {
+          cropper.setCoordinates({
+            left: initialCropCoordinates.x,
+            top: initialCropCoordinates.y,
+            width: initialCropCoordinates.width,
+            height: initialCropCoordinates.height,
+          });
+        }
+      }, 100);
+      return () => clearTimeout(timer);
+    }
+  }, [mode, imageSrc]);
 
   return (
     <div className="relative w-full h-full flex items-center justify-center bg-slate-950 overflow-hidden">
       {mode === 'crop' ? (
-        // 裁切模式
-        <div
-          className="w-full h-full"
-          style={{
-            transform: `rotate(${rotation}deg)`,
-            transition: 'transform 0.3s ease',
+        // 裁切模式 - 使用 cropper 內建旋轉
+        <Cropper
+          ref={cropperRef}
+          src={imageSrc}
+          onChange={handleCropChange}
+          className="h-full! w-full!"
+          stencilProps={{
+            movable: true,
+            resizable: true,
+            lines: true,
+            handlers: true,
           }}
-        >
-          <Cropper
-            ref={cropperRef}
-            src={imageSrc}
-            onChange={handleCropChange}
-            className="!h-full"
-            stencilProps={{
-              movable: true,
-              resizable: true,
-              lines: true,
-              handlers: true,
-            }}
-            backgroundClassName="!bg-slate-950"
-          />
-        </div>
+          backgroundClassName="!bg-slate-950"
+        />
       ) : (
         // 檢視模式
         <div

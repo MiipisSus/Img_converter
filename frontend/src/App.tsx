@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useMemo } from 'react';
+import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { ImagePlus, X } from 'lucide-react';
 import { DropZone } from './components/DropZone';
 import { ImageViewer } from './components/ImageViewer';
@@ -29,28 +29,52 @@ function App() {
   const [flipH, setFlipH] = useState<boolean>(false);
   const [flipV, setFlipV] = useState<boolean>(false);
 
+  // 儲存進入工具時的狀態，用於取消時恢復
+  const savedStateRef = useRef<{
+    rotation: number;
+    quality: number;
+    outputFormat: string;
+    cropCoordinates: CropCoordinates | null;
+  } | null>(null);
+
   // UI 狀態
   const [activeTool, setActiveTool] = useState<ActiveTool>('none');
   const [status, setStatus] = useState<ProcessingStatus>('idle');
   const [progress, setProgress] = useState<number>(0);
   const [errorMessage, setErrorMessage] = useState<string>('');
 
-  // 將檔案轉換為 URL
-  const imageSrc = useMemo(() => {
+  // 將原始檔案轉換為 URL
+  const originalImageSrc = useMemo(() => {
     if (originalFile) {
       return URL.createObjectURL(originalFile);
     }
     return '';
   }, [originalFile]);
 
+  // 將處理後的 Blob 轉換為 URL
+  const processedImageSrc = useMemo(() => {
+    if (processedBlob) {
+      return URL.createObjectURL(processedBlob);
+    }
+    return '';
+  }, [processedBlob]);
+
   // 清理 Object URL
   useEffect(() => {
     return () => {
-      if (imageSrc) {
-        URL.revokeObjectURL(imageSrc);
+      if (originalImageSrc) {
+        URL.revokeObjectURL(originalImageSrc);
       }
     };
-  }, [imageSrc]);
+  }, [originalImageSrc]);
+
+  useEffect(() => {
+    return () => {
+      if (processedImageSrc) {
+        URL.revokeObjectURL(processedImageSrc);
+      }
+    };
+  }, [processedImageSrc]);
 
   // 監聽編輯狀態變化並輸出到 console (測試用)
   useEffect(() => {
@@ -91,10 +115,13 @@ function App() {
     setCropCoordinates(coordinates);
   }, []);
 
-  // 處理旋轉角度變更
+  // 處理旋轉角度變更 (支援任意角度，不標準化)
   const handleRotationChange = useCallback((angle: number) => {
-    const normalizedAngle = ((angle % 360) + 360) % 360;
-    setRotation(normalizedAngle);
+    // 限制在 -180 到 180 之間
+    let normalized = angle;
+    while (normalized > 180) normalized -= 360;
+    while (normalized < -180) normalized += 360;
+    setRotation(normalized);
   }, []);
 
   // 處理翻轉
@@ -106,12 +133,33 @@ function App() {
     setFlipV((prev) => !prev);
   }, []);
 
-  // 處理工具切換
+  // 處理工具切換 - 進入工具時儲存狀態
   const handleToolChange = useCallback((tool: ActiveTool) => {
+    if (tool !== 'none' && activeTool === 'none') {
+      // 進入工具模式時，儲存當前狀態
+      savedStateRef.current = {
+        rotation,
+        quality,
+        outputFormat,
+        cropCoordinates,
+      };
+    }
     setActiveTool(tool);
+  }, [activeTool, rotation, quality, outputFormat, cropCoordinates]);
+
+  // 取消變更 - 恢復到進入工具時的狀態
+  const handleCancel = useCallback(() => {
+    if (savedStateRef.current) {
+      setRotation(savedStateRef.current.rotation);
+      setQuality(savedStateRef.current.quality);
+      setOutputFormat(savedStateRef.current.outputFormat);
+      setCropCoordinates(savedStateRef.current.cropCoordinates);
+      savedStateRef.current = null;
+    }
+    setActiveTool('none');
   }, []);
 
-  // 處理圖片
+  // 處理圖片 - 傳送裁切和旋轉參數到後端
   const handleProcess = useCallback(async () => {
     if (!originalFile) return;
 
@@ -125,6 +173,14 @@ function App() {
           file: originalFile,
           outputFormat: outputFormat || undefined,
           quality,
+          // 旋轉參數 - 需要 expand 以避免裁切
+          rotateAngle: rotation !== 0 ? rotation : undefined,
+          rotateExpand: rotation !== 0 ? true : undefined,
+          // 裁切參數
+          cropX: cropCoordinates?.x,
+          cropY: cropCoordinates?.y,
+          cropWidth: cropCoordinates?.width,
+          cropHeight: cropCoordinates?.height,
         },
         (p) => {
           setProgress(p);
@@ -137,11 +193,15 @@ function App() {
       setProcessedBlob(result.blob);
       setProcessedFilename(result.filename);
       setStatus('done');
+      // 處理完成後關閉工具面板並清除儲存的狀態
+      setActiveTool('none');
+      savedStateRef.current = null;
+      // 保留編輯參數，以便下次進入裁切模式時套用
     } catch (err) {
       setStatus('error');
       setErrorMessage(err instanceof Error ? err.message : '處理失敗，請稍後再試');
     }
-  }, [originalFile, outputFormat, quality]);
+  }, [originalFile, outputFormat, quality, rotation, cropCoordinates]);
 
   // 下載處理後的圖片
   const handleDownload = useCallback(() => {
@@ -163,12 +223,21 @@ function App() {
     setFlipH(false);
     setFlipV(false);
     setActiveTool('none');
+    savedStateRef.current = null;
   }, []);
 
   const isProcessing = status === 'uploading' || status === 'processing';
 
   // 根據當前工具決定 ImageViewer 模式
   const viewMode: ViewMode = activeTool === 'crop' ? 'crop' : 'view';
+
+  // 決定要顯示的圖片
+  // 裁切模式下始終使用原始圖片，以便重新編輯
+  // 非裁切模式下，如果有處理過的圖片且沒有進行新的編輯，顯示處理後的圖片
+  const isEditing = activeTool !== 'none';
+  const displayImageSrc = isEditing ? originalImageSrc : (processedBlob ? processedImageSrc : originalImageSrc);
+  // 編輯中顯示旋轉預覽，處理完成後不顯示（因為已經套用）
+  const displayRotation = isEditing ? rotation : 0;
 
   return (
     <div className="h-dvh flex flex-col bg-slate-950 overflow-hidden">
@@ -214,14 +283,47 @@ function App() {
           </div>
         ) : (
           <>
+            {/* 工具面板 - 左側邊欄(桌面) / 底部抽屜(手機) */}
+            <ToolPanel
+              rotation={rotation}
+              quality={quality}
+              outputFormat={outputFormat}
+              cropCoordinates={cropCoordinates}
+              activeTool={activeTool}
+              onRotationChange={handleRotationChange}
+              onQualityChange={setQuality}
+              onFormatChange={setOutputFormat}
+              onToolChange={handleToolChange}
+              onFlipHorizontal={handleFlipHorizontal}
+              onFlipVertical={handleFlipVertical}
+              onProcess={handleProcess}
+              onDownload={handleDownload}
+              onCancel={handleCancel}
+              isProcessing={isProcessing}
+              hasProcessedImage={!!processedBlob}
+              progress={progress}
+              processingStatus={status}
+              disabled={isProcessing}
+            />
+
             {/* 圖片預覽區 - 無圓角 */}
             <main className="flex-1 relative overflow-hidden lg:pb-0 pb-45">
               <ImageViewer
-                imageSrc={imageSrc}
-                rotation={rotation}
+                imageSrc={displayImageSrc}
+                rotation={displayRotation}
                 mode={viewMode}
+                initialCropCoordinates={cropCoordinates}
                 onCropChange={handleCropChange}
               />
+
+              {/* 處理完成提示 */}
+              {status === 'done' && processedBlob && activeTool === 'none' && (
+                <div className="absolute top-3 right-3 bg-green-500/90 backdrop-blur-sm rounded-lg px-3 py-1.5">
+                  <span className="text-xs text-white font-medium">
+                    已套用變更
+                  </span>
+                </div>
+              )}
 
               {/* 錯誤訊息覆蓋層 */}
               {status === 'error' && (
@@ -241,28 +343,6 @@ function App() {
                 </div>
               )}
             </main>
-
-            {/* 工具面板 - 側邊欄(桌面) / 底部抽屜(手機) */}
-            <ToolPanel
-              rotation={rotation}
-              quality={quality}
-              outputFormat={outputFormat}
-              cropCoordinates={cropCoordinates}
-              activeTool={activeTool}
-              onRotationChange={handleRotationChange}
-              onQualityChange={setQuality}
-              onFormatChange={setOutputFormat}
-              onToolChange={handleToolChange}
-              onFlipHorizontal={handleFlipHorizontal}
-              onFlipVertical={handleFlipVertical}
-              onProcess={handleProcess}
-              onDownload={handleDownload}
-              isProcessing={isProcessing}
-              hasProcessedImage={!!processedBlob}
-              progress={progress}
-              processingStatus={status}
-              disabled={isProcessing}
-            />
           </>
         )}
       </div>
