@@ -1,0 +1,17 @@
+# 圖片處理核心函式庫
+Pillow>=10.2.0
+pillow-heif>=0.16.0  # HEIF/HEIC 格式支援
+cairosvg>=2.7.0      # SVG 向量格式支援
+
+# CLI 框架
+click>=8.1.7
+
+# Web 後端框架（未來使用）
+fastapi>=0.109.0
+uvicorn[standard]>=0.27.0
+python-multipart>=0.0.6
+
+# 開發工具
+pytest>=7.4.0
+pytest-asyncio>=0.21.0
+httpx>=0.25.0  # API 測試用
