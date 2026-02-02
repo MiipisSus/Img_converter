@@ -26,8 +26,9 @@ export interface ImageInfo {
   containerHeight: number    // 容器高度 = naturalHeight * M
 }
 
-/** 最小容器寬度 (px) */
+/** 容器寬度限制 (px) */
 const MIN_CONTAINER_WIDTH = 400
+const MAX_CONTAINER_WIDTH = 800
 
 interface UseImageEditorOptions {
   minCropSize?: number
@@ -54,14 +55,21 @@ export function useImageEditor(options: UseImageEditorOptions | null) {
 
   const minCropSize = options?.minCropSize ?? 50
 
-  // 初始化 (V5 規格)
+  // 初始化 (V6 規格)
   const initialize = useCallback(
     (naturalWidth: number, naturalHeight: number) => {
-      // 計算顯示倍率 M
-      // 若原始寬度 < MIN_CONTAINER_WIDTH，則放大到 MIN_CONTAINER_WIDTH
-      const displayMultiplier = naturalWidth >= MIN_CONTAINER_WIDTH
-        ? 1
-        : MIN_CONTAINER_WIDTH / naturalWidth
+      // 計算顯示倍率 M (V6: 同時處理放大和縮小)
+      let displayMultiplier: number
+      if (naturalWidth > MAX_CONTAINER_WIDTH) {
+        // 大圖縮小顯示
+        displayMultiplier = MAX_CONTAINER_WIDTH / naturalWidth
+      } else if (naturalWidth < MIN_CONTAINER_WIDTH) {
+        // 小圖放大顯示
+        displayMultiplier = MIN_CONTAINER_WIDTH / naturalWidth
+      } else {
+        // 原始大小顯示
+        displayMultiplier = 1
+      }
 
       // 容器尺寸 = 原始尺寸 * M (保持原始比例)
       const containerWidth = Math.round(naturalWidth * displayMultiplier)

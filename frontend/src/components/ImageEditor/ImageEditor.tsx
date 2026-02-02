@@ -125,7 +125,7 @@ export function ImageEditor({
 
   const { cropX, cropY, cropW, cropH, scale, rotate } = state
 
-  // V5: 容器尺寸由 imageInfo 決定
+  // V6: 容器尺寸由 imageInfo 決定
   const containerWidth = imageInfo?.containerWidth ?? 400
   const containerHeight = imageInfo?.containerHeight ?? 300
 
@@ -134,15 +134,31 @@ export function ImageEditor({
       className="flex flex-col gap-4"
       style={{ width: containerWidth }}
     >
-      {/* 容器 - V5: 尺寸 = 原始尺寸 * displayMultiplier，保持原始比例 */}
+      {/* 容器 - V6: 尺寸 = 原始尺寸 * displayMultiplier，保持原始比例 */}
       <div
-        className="relative overflow-hidden bg-gray-900 select-none flex-shrink-0"
+        className="relative overflow-hidden bg-black select-none flex-shrink-0"
         style={{
           width: containerWidth,
           height: containerHeight,
         }}
       >
-        {/* Layer 1: 圖片層 - V5: 圖片填滿容器 */}
+        {/* Layer 0: 棋盤格背景 (用於顯示透明區域) */}
+        <div
+          className="absolute inset-0"
+          style={{
+            backgroundImage: `
+              linear-gradient(45deg, #404040 25%, transparent 25%),
+              linear-gradient(-45deg, #404040 25%, transparent 25%),
+              linear-gradient(45deg, transparent 75%, #404040 75%),
+              linear-gradient(-45deg, transparent 75%, #404040 75%)
+            `,
+            backgroundSize: '20px 20px',
+            backgroundPosition: '0 0, 0 10px, 10px -10px, -10px 0px',
+            backgroundColor: '#808080',
+          }}
+        />
+
+        {/* Layer 1: 圖片層 - V6: 圖片填滿容器 */}
         <div className="absolute inset-0 flex items-center justify-center">
           <img
             ref={imageRef}
@@ -152,10 +168,10 @@ export function ImageEditor({
             draggable={false}
             className="max-w-none pointer-events-none"
             style={{
-              // V5: 圖片尺寸 = 容器尺寸 (填滿)
+              // V6: 圖片尺寸 = 容器尺寸 (填滿)
               width: containerWidth,
               height: containerHeight,
-              // V5 規格: transform-origin 必須是 center center
+              // V6 規格: transform-origin 必須是 center center
               transform: imageTransform,
               transformOrigin: 'center center',
               willChange: 'transform',
