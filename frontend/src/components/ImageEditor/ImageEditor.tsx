@@ -4,10 +4,6 @@ import { useImageEditor, type EditorState, type ImageInfo } from '../../hooks/us
 interface ImageEditorProps {
   /** 圖片來源 */
   src: string
-  /** 最大寬度 */
-  maxWidth?: number
-  /** 最大高度 */
-  maxHeight?: number
   /** 狀態變更回調 */
   onStateChange?: (state: EditorState, imageInfo: ImageInfo | null) => void
 }
@@ -16,25 +12,18 @@ type ResizeHandle = 'nw' | 'ne' | 'sw' | 'se' | 'n' | 's' | 'e' | 'w'
 
 export function ImageEditor({
   src,
-  maxWidth = 800,
-  maxHeight = 600,
   onStateChange,
 }: ImageEditorProps) {
   const imageRef = useRef<HTMLImageElement>(null)
-
-  // Viewport 尺寸 (根據圖片決定)
-  const [viewportSize, setViewportSize] = useState<{ width: number; height: number } | null>(null)
+  const [imageLoaded, setImageLoaded] = useState(false)
 
   // 拖動狀態
   const [isDragging, setIsDragging] = useState(false)
   const [isResizing, setIsResizing] = useState<ResizeHandle | null>(null)
   const dragStartRef = useRef({ x: 0, y: 0, cropX: 0, cropY: 0, cropW: 0, cropH: 0 })
 
-  const editor = useImageEditor(
-    viewportSize
-      ? { viewportWidth: viewportSize.width, viewportHeight: viewportSize.height }
-      : null
-  )
+  // V5: useImageEditor 不再需要 viewport 尺寸參數
+  const editor = useImageEditor({})
 
   const {
     state,
@@ -48,33 +37,14 @@ export function ImageEditor({
     setCropBox,
   } = editor
 
-  // 圖片載入 - 計算 Viewport 尺寸
+  // 圖片載入 - 初始化編輯器
   const handleImageLoad = useCallback(() => {
     const img = imageRef.current
     if (!img) return
 
-    const { naturalWidth, naturalHeight } = img
-
-    // Viewport = 圖片適應最大限制後的尺寸
-    const scaleX = maxWidth / naturalWidth
-    const scaleY = maxHeight / naturalHeight
-    const scale = Math.min(scaleX, scaleY, 1)
-
-    const width = Math.round(naturalWidth * scale)
-    const height = Math.round(naturalHeight * scale)
-
-    setViewportSize({ width, height })
-  }, [maxWidth, maxHeight])
-
-  // Viewport 確定後，初始化編輯器
-  const initializedRef = useRef(false)
-  useEffect(() => {
-    const img = imageRef.current
-    if (!img || !viewportSize || initializedRef.current) return
-
     initialize(img.naturalWidth, img.naturalHeight)
-    initializedRef.current = true
-  }, [viewportSize, initialize])
+    setImageLoaded(true)
+  }, [initialize])
 
   // 回報狀態變更
   useEffect(() => {
@@ -155,17 +125,24 @@ export function ImageEditor({
 
   const { cropX, cropY, cropW, cropH, scale, rotate } = state
 
+  // V5: 容器尺寸由 imageInfo 決定
+  const containerWidth = imageInfo?.containerWidth ?? 400
+  const containerHeight = imageInfo?.containerHeight ?? 300
+
   return (
-    <div className="inline-flex flex-col gap-4">
-      {/* Viewport (固定容器) */}
+    <div
+      className="flex flex-col gap-4"
+      style={{ width: containerWidth }}
+    >
+      {/* 容器 - V5: 尺寸 = 原始尺寸 * displayMultiplier，保持原始比例 */}
       <div
-        className="relative overflow-hidden bg-gray-900 select-none"
+        className="relative overflow-hidden bg-gray-900 select-none flex-shrink-0"
         style={{
-          width: viewportSize?.width ?? 'auto',
-          height: viewportSize?.height ?? 'auto',
+          width: containerWidth,
+          height: containerHeight,
         }}
       >
-        {/* Layer 1: 圖片層 */}
+        {/* Layer 1: 圖片層 - V5: 圖片填滿容器 */}
         <div className="absolute inset-0 flex items-center justify-center">
           <img
             ref={imageRef}
@@ -175,9 +152,10 @@ export function ImageEditor({
             draggable={false}
             className="max-w-none pointer-events-none"
             style={{
-              width: imageInfo?.displayWidth || 'auto',
-              height: imageInfo?.displayHeight || 'auto',
-              // V2 規格: transform-origin 必須是 center center
+              // V5: 圖片尺寸 = 容器尺寸 (填滿)
+              width: containerWidth,
+              height: containerHeight,
+              // V5 規格: transform-origin 必須是 center center
               transform: imageTransform,
               transformOrigin: 'center center',
               willChange: 'transform',
@@ -185,7 +163,7 @@ export function ImageEditor({
           />
         </div>
 
-        {imageInfo && viewportSize && (
+        {imageInfo && imageLoaded && (
           <>
             {/* Layer 2: 遮罩層 */}
             <div className="absolute inset-0 pointer-events-none">
@@ -249,9 +227,9 @@ export function ImageEditor({
         )}
       </div>
 
-      {/* 控制面板 */}
-      {viewportSize && (
-        <div className="flex flex-col gap-3 p-3 bg-white rounded shadow" style={{ width: viewportSize.width }}>
+      {/* 控制面板 - 獨立於圖片容器 */}
+      {imageInfo && (
+        <div className="flex flex-col gap-3 p-3 bg-white rounded shadow">
           {/* Scale 滑桿 */}
           <div className="flex items-center gap-3">
             <label className="w-16 text-sm text-gray-600">縮放</label>
@@ -285,13 +263,13 @@ export function ImageEditor({
       )}
 
       {/* Debug 資訊 */}
-      {import.meta.env.DEV && imageInfo && viewportSize && (
+      {import.meta.env.DEV && imageInfo && (
         <div className="text-xs text-gray-500 font-mono space-y-1">
           <div>原圖: {imageInfo.naturalWidth} × {imageInfo.naturalHeight}</div>
-          <div>顯示: {imageInfo.displayWidth.toFixed(0)} × {imageInfo.displayHeight.toFixed(0)}</div>
-          <div>Viewport: {viewportSize.width} × {viewportSize.height}</div>
+          <div>容器: {imageInfo.containerWidth} × {imageInfo.containerHeight} (M: {imageInfo.displayMultiplier.toFixed(2)})</div>
           <div>image: ({state.imageX}, {state.imageY}), scale: {scale.toFixed(2)}, rotate: {rotate}°</div>
           <div>cropBox: ({cropX.toFixed(0)}, {cropY.toFixed(0)}) {cropW.toFixed(0)} × {cropH.toFixed(0)}</div>
+          <div>導出尺寸: {(cropW / imageInfo.displayMultiplier).toFixed(0)} × {(cropH / imageInfo.displayMultiplier).toFixed(0)} px</div>
         </div>
       )}
     </div>

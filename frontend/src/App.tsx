@@ -83,8 +83,6 @@ function App() {
         <div className="flex flex-col items-center gap-4">
           <ImageEditor
             src={imageSrc}
-            maxWidth={800}
-            maxHeight={600}
             onStateChange={handleStateChange}
           />
 

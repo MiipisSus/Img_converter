@@ -1,40 +1,42 @@
-圖片裁切工具架構設計規格 (V3 - 最終座標修正版)
+圖片裁切工具架構設計規格 (V5 - 比例貼合與還原修正版)
 
-1.  核心邏輯：固定視窗縮放 (Fixed Viewport Scaling)
+1.  佈局邏輯：Responsive Fitting
 
-    Viewport (容器)：畫面上固定的顯示區域（例如 500x500）。
+    容器比例 (Container Aspect)：容器的長寬比必須嚴格等於圖片的 naturalWidth / naturalHeight。
 
-    Image Content (圖片)：在 Viewport 內變換，transform-origin 必須為 center center。
+    顯示倍率 (Display Multiplier)：
 
-    Crop Box (裁切框)：獨立於圖片，浮動在 Viewport 之上。
+        若圖片原始寬度 > MIN_WIDTH (如 400px)，則顯示倍率 M=1。
 
-    座標基準：
+        若圖片原始寬度 < MIN_WIDTH，則顯示倍率 M=400/naturalWidth。
 
-        image.x/y：圖片中心點相對於 Viewport 中心點 的位移。
+        容器 CSS 尺寸 = (naturalWidth∗M,naturalHeight∗M)。
 
-        cropBox.x/y：裁切框左上角相對於 Viewport 左上角 的座標。
+    視覺呈現：圖片應初始填滿容器（不留白邊），容器背景應被圖片完全覆蓋。
 
 2.  數據模型 (Data State)
-    interface CropState {
-    image: {
-    x: number; // 圖片中心位移 (px)
-    y: number; // 圖片中心位移 (px)
-    scale: number; // 縮放倍率 (1.0+)
-    rotate: number; // 旋轉角度 (0-360)
-    };
-    cropBox: {
-    x: number; // 框左上角 X (相對 Viewport)
-    y: number; // 框左上角 Y (相對 Viewport)
-    w: number; // 框寬度
-    h: number; // 框高度
-    };
-    }
 
-3.  座標同步與變換順序 (The Golden Rule)
+所有座標均以「UI 顯示尺寸」為基準（即包含 M 放大後的尺寸）：
+TypeScript
 
-預覽 (CSS) 與 導出 (Canvas) 必須嚴格遵守以下變換順序，否則旋轉時會產生軌跡偏移：
+interface CropState {
+displayMultiplier: number; // 即上述的 M
+image: {
+x: number; y: number; // 圖片中心相對於容器中心的 UI 位移
+scale: number; // 使用者縮放倍率
+rotate: number; // 0-360
+};
+cropBox: {
+x: number; y: number; // 裁切框在容器內的 UI 座標
+w: number; h: number; // 裁切框在容器內的 UI 寬高
+};
+}
 
-    Translate (平移至中心)
+3. 座標同步與變換順序 (The Golden Rule)
+
+預覽 (CSS) 與 導出 (Canvas) 必須嚴格遵守以下變換順序：
+
+    Translate (平移)
 
     Rotate (旋轉)
 
@@ -42,36 +44,42 @@
 
 4. Canvas 導出精確公式 (Canvas Export Logic)
 
-在執行 ctx.drawImage 前，必須建立一個與圖片預覽狀態完全平行的座標系：
+為確保「成品尺寸」等於「原始像素尺寸」，必須在 Canvas 運算中消除 M 的影響：
 
-    畫布尺寸：canvas.width = cropBox.w; canvas.height = cropBox.h;
+    畫布尺寸 (還原像素)：
 
-    平移至畫布中心：ctx.translate(canvas.width / 2, canvas.height / 2);
+        canvas.width = cropBox.w / M;
 
-    套用旋轉與縮放：
+        canvas.height = cropBox.h / M;
 
-        ctx.rotate((image.rotate * Math.PI) / 180);
+    座標變換與繪製 (邏輯對齊)：
 
-        ctx.scale(image.scale, image.scale);
+        計算 UI 向量差：
 
-    計算相對位移 (Vector D)：
+            distX = (cropBox.x + cropBox.w / 2) - (container.w / 2 + image.x);
 
-        distX = (cropBox.x + cropBox.w / 2) - (viewport.w / 2 + image.x);
+            distY = (cropBox.y + cropBox.h / 2) - (container.h / 2 + image.y);
 
-        distY = (cropBox.y + cropBox.h / 2) - (viewport.h / 2 + image.y);
+        轉換為原始像素向量：
 
-    繪製圖片 (Final Draw)：
+            distX_orig = distX / M;
 
-        使用圖片在 Viewport 中的初始顯示寬高 (Wview​, Hview​)。
+            distY_orig = distY / M;
 
-        ctx.drawImage(img, (-W_view / 2) - (distX / image.scale), (-H_view / 2) - (distY / image.scale), W_view, H_view);
+        Canvas 繪製：
 
-        注意：dist 必須除以 scale 是因為 ctx.scale 會縮放整個座標軸空間。
+            ctx.translate(canvas.width / 2 - distX_orig, canvas.height / 2 - distY_orig); (平移原點)
+
+            ctx.rotate((image.rotate * Math.PI) / 180);
+
+            ctx.scale(image.scale, image.scale);
+
+            ctx.drawImage(img, -img.naturalWidth / 2, -img.naturalHeight / 2, img.naturalWidth, img.naturalHeight);
 
 5. 實作檢查清單
 
-   [ ] 圖片加載後，初始 Wview​ 與 Hview​ 需根據 object-fit: contain 計算。
+   [] 容器寬高比需動態綁定為 img.naturalWidth / img.naturalHeight。
 
-   [ ] 確保 CSS transform 順序為 translate(x, y) rotate(r) scale(s)。
+   [] 小圖載入時自動計算 M，確保 UI 操作區寬度至少為 400px。
 
-   [ ] 導出時，W_view 是圖片未經 scale 變換前的初始顯示尺寸。
+   [] 重點：Canvas 導出時，W_view 應代換為 img.naturalWidth，並確保所有位移量均已除以 displayMultiplier。

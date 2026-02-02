@@ -15,26 +15,28 @@ export interface CropResult {
 }
 
 /**
- * 根據編輯器狀態生成裁切後的圖片 (V3 規格)
+ * 根據編輯器狀態生成裁切後的圖片 (V5 規格)
+ *
+ * V5 核心概念:
+ * - UI 座標系使用 displayMultiplier (M) 放大顯示
+ * - 導出時必須除以 M 還原為原始像素尺寸
  *
  * 座標同步邏輯 (The Golden Rule):
  * - CSS 預覽與 Canvas 必須共用同一個變換順序
  * - 順序: translate → rotate → scale
  *
- * V3 核心修正:
- * - distX/distY 是在 Viewport 座標系（未旋轉）中的向量
- * - 必須在 rotate/scale 之前套用 translate，讓偏移向量與座標系一起被正確變換
- * - 這樣不需要手動計算三角函數，Canvas 的 rotate() 會自然處理方向
- *
- * Canvas 導出公式:
- * 1. canvas.width = cropBox.w, canvas.height = cropBox.h
- * 2. 計算偏移 (Viewport 座標系):
- *    - distX = (cropBox.x + cropBox.w/2) - (viewport.w/2 + image.x)
- *    - distY = (cropBox.y + cropBox.h/2) - (viewport.h/2 + image.y)
- * 3. ctx.translate(canvas.width/2 - distX, canvas.height/2 - distY) ← 關鍵：先套用偏移
- * 4. ctx.rotate(rotate * PI/180)
- * 5. ctx.scale(scale, scale)
- * 6. ctx.drawImage(img, -W_view/2, -H_view/2, W_view, H_view)
+ * Canvas 導出公式 (V5):
+ * 1. canvas.width = cropBox.w / M, canvas.height = cropBox.h / M (還原像素)
+ * 2. 計算 UI 向量差:
+ *    - distX = (cropBox.x + cropBox.w/2) - (container.w/2 + image.x)
+ *    - distY = (cropBox.y + cropBox.h/2) - (container.h/2 + image.y)
+ * 3. 轉換為原始像素向量:
+ *    - distX_orig = distX / M
+ *    - distY_orig = distY / M
+ * 4. ctx.translate(canvas.width/2 - distX_orig, canvas.height/2 - distY_orig)
+ * 5. ctx.rotate(rotate * PI/180)
+ * 6. ctx.scale(scale, scale)
+ * 7. ctx.drawImage(img, -naturalWidth/2, -naturalHeight/2, naturalWidth, naturalHeight)
  */
 export async function generateCroppedImage(
   image: HTMLImageElement,
@@ -44,48 +46,53 @@ export async function generateCroppedImage(
 ): Promise<CropResult> {
   const { format = 'image/png', quality = 0.92 } = options
   const { imageX, imageY, scale, rotate, cropX, cropY, cropW, cropH } = state
-  const { displayWidth, displayHeight, viewportWidth, viewportHeight } = imageInfo
+  const { naturalWidth, naturalHeight, displayMultiplier, containerWidth, containerHeight } = imageInfo
 
-  // 1. 畫布準備：使用裁切框的視覺尺寸
+  // M = displayMultiplier
+  const M = displayMultiplier
+
+  // 1. 畫布準備：除以 M 還原為原始像素尺寸
   const canvas = document.createElement('canvas')
-  canvas.width = Math.round(cropW)
-  canvas.height = Math.round(cropH)
+  canvas.width = Math.round(cropW / M)
+  canvas.height = Math.round(cropH / M)
 
   const ctx = canvas.getContext('2d')
   if (!ctx) {
     throw new Error('無法建立 Canvas Context')
   }
 
-  // 2. 計算偏移向量 (在 Viewport 座標系中)
-  // 找出「裁切框中心」與「圖片中心」的距離
-
-  // 裁切框中心 (Viewport 座標)
+  // 2. 計算 UI 向量差 (在容器座標系中)
+  // 裁切框中心 (UI 座標)
   const cropCenterX = cropX + cropW / 2
   const cropCenterY = cropY + cropH / 2
 
-  // 圖片中心 (Viewport 座標) = Viewport 中心 + 圖片偏移
-  const imageCenterX = viewportWidth / 2 + imageX
-  const imageCenterY = viewportHeight / 2 + imageY
+  // 圖片中心 (UI 座標) = 容器中心 + 圖片偏移
+  const imageCenterX = containerWidth / 2 + imageX
+  const imageCenterY = containerHeight / 2 + imageY
 
-  // 裁切框中心與圖片中心的距離 (Viewport 座標系)
+  // UI 向量差
   const distX = cropCenterX - imageCenterX
   const distY = cropCenterY - imageCenterY
 
-  // 3. 座標變換步驟 (V3 關鍵修正)
-  // 必須先套用 translate (包含 distX/distY)，再 rotate/scale
-  // 這樣偏移向量會和旋轉/縮放一起被正確變換，不需要手動計算三角函數
+  // 3. 轉換為原始像素向量 (除以 M)
+  const distX_orig = distX / M
+  const distY_orig = distY / M
 
-  // 3.1 平移到「圖片中心相對於 Canvas 中心」的位置
-  ctx.translate(canvas.width / 2 - distX, canvas.height / 2 - distY)
+  // 4. 座標變換步驟
+  // 必須先套用 translate (包含偏移)，再 rotate/scale
+  // 這樣偏移向量會和旋轉/縮放一起被正確變換
 
-  // 3.2 旋轉
+  // 4.1 平移到「圖片中心相對於 Canvas 中心」的位置 (原始像素座標)
+  ctx.translate(canvas.width / 2 - distX_orig, canvas.height / 2 - distY_orig)
+
+  // 4.2 旋轉
   ctx.rotate((rotate * Math.PI) / 180)
 
-  // 3.3 縮放
+  // 4.3 縮放
   ctx.scale(scale, scale)
 
-  // 4. 繪製圖片 (以圖片中心為原點)
-  ctx.drawImage(image, -displayWidth / 2, -displayHeight / 2, displayWidth, displayHeight)
+  // 5. 繪製圖片 (使用原始像素尺寸)
+  ctx.drawImage(image, -naturalWidth / 2, -naturalHeight / 2, naturalWidth, naturalHeight)
 
   // 轉換為 Blob
   const blob = await new Promise<Blob>((resolve, reject) => {

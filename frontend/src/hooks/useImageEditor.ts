@@ -1,36 +1,35 @@
 import { useState, useCallback, useMemo, useRef } from 'react'
 
 /**
- * 編輯器狀態 (符合 V2 規格)
+ * 編輯器狀態 (符合 V5 規格)
  */
 export interface EditorState {
-  // 圖片變換 (相對於 Viewport 中心)
-  imageX: number      // 圖片中心相對於 Viewport 中心的 X 偏移
-  imageY: number      // 圖片中心相對於 Viewport 中心的 Y 偏移
+  // 圖片變換 (相對於容器中心)
+  imageX: number      // 圖片中心相對於容器中心的 X 偏移
+  imageY: number      // 圖片中心相對於容器中心的 Y 偏移
   scale: number       // 使用者縮放倍率 (1.0+)
   rotate: number      // 旋轉角度 (0-360)
 
-  // 裁切框 (相對於 Viewport 左上角)
+  // 裁切框 (相對於容器左上角，UI 座標)
   cropX: number
   cropY: number
   cropW: number
   cropH: number
 }
 
-/** 圖片資訊 */
+/** 圖片資訊 (V5 規格) */
 export interface ImageInfo {
-  naturalWidth: number    // 原始像素寬度
-  naturalHeight: number   // 原始像素高度
-  displayWidth: number    // 顯示寬度 (= naturalWidth * baseScale)
-  displayHeight: number   // 顯示高度 (= naturalHeight * baseScale)
-  viewportWidth: number   // Viewport 寬度
-  viewportHeight: number  // Viewport 高度
-  baseScale: number       // 基礎縮放比例 (contain)
+  naturalWidth: number       // 原始像素寬度
+  naturalHeight: number      // 原始像素高度
+  displayMultiplier: number  // 顯示倍率 M (小圖放大用)
+  containerWidth: number     // 容器寬度 = naturalWidth * M
+  containerHeight: number    // 容器高度 = naturalHeight * M
 }
 
+/** 最小容器寬度 (px) */
+const MIN_CONTAINER_WIDTH = 400
+
 interface UseImageEditorOptions {
-  viewportWidth: number
-  viewportHeight: number
   minCropSize?: number
 }
 
@@ -55,41 +54,36 @@ export function useImageEditor(options: UseImageEditorOptions | null) {
 
   const minCropSize = options?.minCropSize ?? 50
 
-  // 初始化
+  // 初始化 (V5 規格)
   const initialize = useCallback(
     (naturalWidth: number, naturalHeight: number) => {
-      const opts = optionsRef.current
-      if (!opts) return
+      // 計算顯示倍率 M
+      // 若原始寬度 < MIN_CONTAINER_WIDTH，則放大到 MIN_CONTAINER_WIDTH
+      const displayMultiplier = naturalWidth >= MIN_CONTAINER_WIDTH
+        ? 1
+        : MIN_CONTAINER_WIDTH / naturalWidth
 
-      const { viewportWidth, viewportHeight } = opts
-
-      // 計算 baseScale (contain strategy)
-      const scaleX = viewportWidth / naturalWidth
-      const scaleY = viewportHeight / naturalHeight
-      const baseScale = Math.min(scaleX, scaleY)
-
-      const displayWidth = naturalWidth * baseScale
-      const displayHeight = naturalHeight * baseScale
+      // 容器尺寸 = 原始尺寸 * M (保持原始比例)
+      const containerWidth = Math.round(naturalWidth * displayMultiplier)
+      const containerHeight = Math.round(naturalHeight * displayMultiplier)
 
       setImageInfo({
         naturalWidth,
         naturalHeight,
-        displayWidth,
-        displayHeight,
-        viewportWidth,
-        viewportHeight,
-        baseScale,
+        displayMultiplier,
+        containerWidth,
+        containerHeight,
       })
 
-      // 初始裁切框：置中，佔 viewport 80%
-      const cropSize = Math.min(viewportWidth, viewportHeight) * 0.8
+      // 初始裁切框：置中，佔容器 80%
+      const cropSize = Math.min(containerWidth, containerHeight) * 0.8
       setState({
         imageX: 0,
         imageY: 0,
         scale: 1,
         rotate: 0,
-        cropX: (viewportWidth - cropSize) / 2,
-        cropY: (viewportHeight - cropSize) / 2,
+        cropX: (containerWidth - cropSize) / 2,
+        cropY: (containerHeight - cropSize) / 2,
         cropW: cropSize,
         cropH: cropSize,
       })
@@ -118,20 +112,24 @@ export function useImageEditor(options: UseImageEditorOptions | null) {
     setState((prev) => ({ ...prev, imageX: x, imageY: y }))
   }, [])
 
+  // 用於邊界檢查的 imageInfo ref
+  const imageInfoRef = useRef<ImageInfo | null>(null)
+  imageInfoRef.current = imageInfo
+
   // 移動裁切框
   const moveCropBox = useCallback(
     (deltaX: number, deltaY: number) => {
-      const opts = optionsRef.current
-      if (!opts) return
+      const info = imageInfoRef.current
+      if (!info) return
 
-      const { viewportWidth, viewportHeight } = opts
+      const { containerWidth, containerHeight } = info
 
       setState((prev) => {
         let newX = prev.cropX + deltaX
         let newY = prev.cropY + deltaY
 
-        newX = Math.max(0, Math.min(viewportWidth - prev.cropW, newX))
-        newY = Math.max(0, Math.min(viewportHeight - prev.cropH, newY))
+        newX = Math.max(0, Math.min(containerWidth - prev.cropW, newX))
+        newY = Math.max(0, Math.min(containerHeight - prev.cropH, newY))
 
         return { ...prev, cropX: newX, cropY: newY }
       })
@@ -146,10 +144,10 @@ export function useImageEditor(options: UseImageEditorOptions | null) {
       deltaX: number,
       deltaY: number
     ) => {
-      const opts = optionsRef.current
-      if (!opts) return
+      const info = imageInfoRef.current
+      if (!info) return
 
-      const { viewportWidth, viewportHeight } = opts
+      const { containerWidth, containerHeight } = info
 
       setState((prev) => {
         let { cropX, cropY, cropW, cropH } = prev
@@ -202,11 +200,11 @@ export function useImageEditor(options: UseImageEditorOptions | null) {
           cropX = 0
           cropW = originalRight
         }
-        if (handle.includes('s') && cropY + cropH > viewportHeight) {
-          cropH = viewportHeight - cropY
+        if (handle.includes('s') && cropY + cropH > containerHeight) {
+          cropH = containerHeight - cropY
         }
-        if (handle.includes('e') && cropX + cropW > viewportWidth) {
-          cropW = viewportWidth - cropX
+        if (handle.includes('e') && cropX + cropW > containerWidth) {
+          cropW = containerWidth - cropX
         }
 
         // 最小尺寸
@@ -234,7 +232,7 @@ export function useImageEditor(options: UseImageEditorOptions | null) {
   )
 
   /**
-   * CSS Transform (符合 V2 規格順序: translate → rotate → scale)
+   * CSS Transform (符合 V5 規格順序: translate → rotate → scale)
    * transform-origin 必須是 center center
    */
   const imageTransform = useMemo(() => {
