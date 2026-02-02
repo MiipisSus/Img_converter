@@ -83,17 +83,16 @@ export function useImageEditor(options: UseImageEditorOptions | null) {
         containerHeight,
       })
 
-      // 初始裁切框：置中，佔容器 80%
-      const cropSize = Math.min(containerWidth, containerHeight) * 0.8
+      // 初始裁切框：完全貼合容器
       setState({
         imageX: 0,
         imageY: 0,
         scale: 1,
         rotate: 0,
-        cropX: (containerWidth - cropSize) / 2,
-        cropY: (containerHeight - cropSize) / 2,
-        cropW: cropSize,
-        cropH: cropSize,
+        cropX: 0,
+        cropY: 0,
+        cropW: containerWidth,
+        cropH: containerHeight,
       })
 
       initializedRef.current = true
