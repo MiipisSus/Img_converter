@@ -1,7 +1,7 @@
 import { useState, useCallback, useRef } from 'react'
-import { ImageCropper } from './components/ImageEditor'
+import { ImageEditor } from './components/ImageEditor'
 import { generateCroppedImage, type CropResult } from './utils/generateCroppedImage'
-import type { CropBoxState } from './hooks/useCropBox'
+import type { EditorState, ImageInfo } from './hooks/useImageEditor'
 
 function App() {
   const [imageSrc, setImageSrc] = useState<string | null>(null)
@@ -9,7 +9,7 @@ function App() {
   const [isExporting, setIsExporting] = useState(false)
 
   const imageRef = useRef<HTMLImageElement | null>(null)
-  const cropStateRef = useRef<{ state: CropBoxState; scale: number } | null>(null)
+  const editorStateRef = useRef<{ state: EditorState; imageInfo: ImageInfo } | null>(null)
 
   const handleFileChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -32,21 +32,25 @@ function App() {
     []
   )
 
-  const handleCropChange = useCallback((state: CropBoxState, scale: number) => {
-    cropStateRef.current = { state, scale }
+  const handleStateChange = useCallback((state: EditorState, imageInfo: ImageInfo | null) => {
+    if (imageInfo) {
+      editorStateRef.current = { state, imageInfo }
+    }
   }, [])
 
   const handleExport = useCallback(async () => {
-    if (!imageRef.current || !cropStateRef.current || isExporting) return
+    if (!imageRef.current || !editorStateRef.current || isExporting) return
 
     setIsExporting(true)
     try {
+      const { state, imageInfo } = editorStateRef.current
       const result: CropResult = await generateCroppedImage(
         imageRef.current,
-        cropStateRef.current.state,
-        { displayScale: cropStateRef.current.scale }
+        state,
+        imageInfo
       )
       setPreviewUrl(result.dataUrl)
+      console.log('導出尺寸:', result.width, '×', result.height)
     } catch (error) {
       console.error('導出失敗:', error)
     } finally {
@@ -77,11 +81,11 @@ function App() {
         </div>
       ) : (
         <div className="flex flex-col items-center gap-4">
-          <ImageCropper
+          <ImageEditor
             src={imageSrc}
-            maxWidth={500}
-            maxHeight={400}
-            onCropChange={handleCropChange}
+            maxWidth={800}
+            maxHeight={600}
+            onStateChange={handleStateChange}
           />
 
           <div className="flex gap-2">

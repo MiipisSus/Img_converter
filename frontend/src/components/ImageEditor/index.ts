@@ -1,1 +1,1 @@
-export { ImageCropper } from './ImageCropper'
+export { ImageEditor } from './ImageEditor'
