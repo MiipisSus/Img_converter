@@ -1,91 +1,49 @@
-圖片裁切工具架構設計規格 (V5 - 比例貼合與還原修正版)
+# 圖片裁切引擎規格 (V6 - 雙向自適應與像素還原版)
 
-1.  佈局邏輯：Responsive Fitting
+## 1. 佈局邏輯：Responsive Fitting
 
-    容器比例 (Container Aspect)：容器的長寬比必須嚴格等於圖片的 naturalWidth / naturalHeight。
+- **容器比例 (Container Aspect)**：容器長寬比必須嚴格等於 `naturalWidth / naturalHeight`。
+- **動態顯示倍率 (displayMultiplier, M)**：
+  - `MIN_WIDTH = 400`, `MAX_WIDTH = 800`。
+  - 計算邏輯：
+    1. 若 `naturalWidth > MAX_WIDTH`：$M = MAX\_WIDTH / naturalWidth$
+    2. 若 `naturalWidth < MIN_WIDTH`：$M = 400 / naturalWidth$
+    3. 其他：$M = 1$
+  - 容器 CSS 尺寸 = $(naturalWidth * M, naturalHeight * M)$。
+- **背景設計**：
+  - 容器層：背景色固定為黑色 (`#000000`)。
+  - 圖片層：下方墊一層 CSS 棋盤格圖案（Checkerboard），用於識別透明區域。
 
-    動態顯示倍率 (displayMultiplier, M)：
+## 2. 數據模型 (Crop State)
 
-        設定顯示邊界：MIN_WIDTH = 400, MAX_WIDTH = 800 (或視窗寬度的 80%)。
+座標以「UI 顯示尺寸」記錄，數據需與 `displayMultiplier` 綁定。
 
-        計算邏輯：
-
-            若 naturalWidth > MAX_WIDTH：M=MAX_WIDTH/naturalWidth (縮小顯示)。
-
-            若 naturalWidth < MIN_WIDTH：M=MIN_WIDTH/naturalWidth (放大顯示)。
-
-            其他情況：M=1 (原始大小顯示)。
-
-        容器 CSS 尺寸 = (naturalWidth∗M,naturalHeight∗M)。
-
-    視覺呈現：容器應剛好包裹圖片，不論縮小或放大，背景都應被圖片填滿。
-
-2.  數據模型 (Data State)
-
-所有座標與尺寸（如 cropBox.w）均以「UI 顯示尺寸」記錄：
-TypeScript
-
+```typescript
 interface CropState {
-displayMultiplier: number; // 關鍵倍率 M
-image: {
-x: number; y: number; // 相對於容器中心的 UI 位移
-scale: number; // 用戶縮放倍率
-rotate: number; // 0-360
-};
-cropBox: {
-x: number; y: number; // 相對於容器左上角的 UI 座標
-w: number; h: number; // UI 寬高
-};
+  displayMultiplier: number;
+  image: { x: number; y: number; scale: number; rotate: number };
+  cropBox: { x: number; y: number; w: number; h: number };
 }
+```
 
-3. 座標同步與變換順序 (The Golden Rule)
+3. 變換順序 (The Golden Rule)
 
-預覽 (CSS) 與 導出 (Canvas) 順序必須完全一致：
+預覽與 Canvas 導出順序必須一致：1. Translate -> 2. Rotate -> 3. Scale。4. Canvas 導出公式 (Pixel-Back Logic)
 
-    Translate (平移)
+導出時須消除 M 的影響以還原原始像素：
 
-    Rotate (旋轉)
+    畫布尺寸：canvas.width = cropBox.w / M; canvas.height = cropBox.h / M;
 
-    Scale (縮放)
+    座標變換：
 
-4. Canvas 導出精確公式 (Canvas Export Logic)
+        distX_orig = ((cropBox.x + cropBox.w/2) - (container.w/2 + image.x)) / M;
 
-導出的核心是**「無視 M 的存在」**，直接對應原始像素：
+        distY_orig = ((cropBox.y + cropBox.h/2) - (container.h/2 + image.y)) / M;
 
-    畫布尺寸 (還原像素)：
+        ctx.translate(canvas.width / 2 - distX_orig, canvas.height / 2 - distY_orig);
 
-        canvas.width = cropBox.w / M;
+        ctx.rotate((image.rotate * Math.PI) / 180);
 
-        canvas.height = cropBox.h / M;
+        ctx.scale(image.scale, image.scale);
 
-    座標變換與繪製：
-
-        計算 UI 向量差：
-
-            distX = (cropBox.x + cropBox.w / 2) - (container.w / 2 + image.x);
-
-            distY = (cropBox.y + cropBox.h / 2) - (container.h / 2 + image.y);
-
-        轉換為原始像素向量：
-
-            distX_orig = distX / M;
-
-            distY_orig = distY / M;
-
-        Canvas 繪製步驟：
-
-            ctx.translate(canvas.width / 2 - distX_orig, canvas.height / 2 - distY_orig);
-
-            ctx.rotate((image.rotate * Math.PI) / 180);
-
-            ctx.scale(image.scale, image.scale);
-
-            ctx.drawImage(img, -img.naturalWidth / 2, -img.naturalHeight / 2, img.naturalWidth, img.naturalHeight);
-
-5. 實作檢查清單
-
-   [x] 監聽圖片載入事件，動態計算符合 MAX_WIDTH 或 MIN_WIDTH 的 M 值。
-
-   [x] 確保容器 CSS 使用 width 和 height 直接設定，而非固定的像素值。
-
-   [x] 驗證：2500px 的圖在 UI 上顯示為 800px (M=0.32)，裁切 400px 的框時，導出圖片應為 400/0.32=1250px。
+        ctx.drawImage(img, -img.naturalWidth / 2, -img.naturalHeight / 2);
