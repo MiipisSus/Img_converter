@@ -1,26 +1,24 @@
 圖片裁切工具架構設計規格 (Image Cropper Specification)
 
-1. 核心邏輯架構 (The "Virtual View" Approach)
+## 1. 核心邏輯架構 (Fixed Image, Movable CropBox)
 
-為了確保流暢度與開發彈性，我們捨棄直接操作像素，採用三層分離架構：
+我們採用「底圖固定，裁切框自由操作」的架構：
 
-    Layer 1: Container (容器層) - 固定尺寸的作業區域。
+- **Layer 1: Background Layer**: 放置原始圖片，通常縮放至適應螢幕大小。
+- **Layer 2: CropBox Layer**: 一個可移動、可調整大小的矩形框，浮動在圖片上方。
+- **Layer 3: Shroud/Mask**: 裁切框以外的區域顯示半透明黑色遮罩。
 
-    Layer 2: Image Layer (圖片層) - 原始圖片。透過 CSS transform (matrix) 進行位移、旋轉、縮放。
+## 2. 數據模型 (Data State)
 
-    Layer 3: Cropper Overlay (裁切框層) - 固定在中心或可拖動的 UI 框，定義最終輸出的 可視窗口 (Viewport)。
+狀態管理以「裁切框相對於圖片的像素座標」為準：
 
-2. 數據模型 (Data State)
-
-不記錄圖片的寬高，而是記錄圖片相對於裁切框中心的變換狀態：
-TypeScript
-
+```typescript
 interface CropState {
-x: number; // 水平位移 (px)
-y: number; // 垂直位移 (px)
-scale: number; // 縮放比例 (預設 1)
-rotate: number; // 旋轉角度 (0, 90, 180, 270)
-aspectRatio: number; // 裁切比例 (例如 1, 4/3, 16/9)
+  cropX: number;      // 裁切框左上角在圖片上的 X 座標
+  cropY: number;      // 裁切框左上角在圖片上的 Y 座標
+  cropW: number;      // 裁切框的寬度
+  cropH: number;      // 裁切框的高度
+  imageRotate: number; // 圖片旋轉角度 (0, 90, 180, 270)
 }
 
 3.  前端預覽實作原則
@@ -67,3 +65,41 @@ aspectRatio: number; // 裁切比例 (例如 1, 4/3, 16/9)
    [ ] 支援觸控事件 (Touch Events) 的雙指縮放。
 
    [ ] 旋轉時自動調整圖片縮放比例以填滿框位。
+
+## 6. 座標轉換與裁切邏輯 (Coordinate Transformation)
+
+為了確保「所見即所得」，Canvas 導出時必須嚴格遵循與 CSS 預覽相同的變換順序。
+
+### A. 核心參數定義
+
+- **OriginalSize**: 圖片原始像素寬高 ($W_{orig}$, $H_{orig}$)。
+- **DisplaySize**: 圖片在畫面上顯示的初始寬高（通常是縮放後的 $W_{view}$, $H_{view}$）。
+- **CropBoxSize**: 裁切框的固定寬高。
+- **TransformState**: 使用者操作後的 $\{x, y, scale, rotate\}$。
+
+### B. 繪製公式與步驟
+
+當執行 `canvas.drawImage()` 時，請依照下列順序操作 Context：
+
+1. **設定 Canvas 畫布尺寸**：
+   Canvas 寬高應等於 `CropBoxSize` 的目標輸出尺寸。
+
+2. **移至中心 (Center Pivot)**：
+   `ctx.translate(canvas.width / 2, canvas.height / 2)`
+   _所有後續旋轉與縮放都將以此中心點進行。_
+
+3. **執行旋轉 (Rotate)**：
+   `ctx.rotate((rotate * Math.PI) / 180)`
+
+4. **執行縮放 (Scale)**：
+   `ctx.scale(scale, scale)`
+
+5. **繪製圖片 (Draw)**：
+   需計算圖片相對於中心點的偏移。計算公式如下：
+   `ctx.drawImage(img, -W_{view} / 2 + (x / scale), -H_{view} / 2 + (y / scale), W_{view}, H_{view})`
+
+### C. 注意事項
+
+- **座標歸一化**：$x$ 與 $y$ 是相對於裁切框中心的偏移量，而非絕對座標。
+- **DPI 處理**：若需導出高解析度圖片，Canvas 尺寸需乘以 `window.devicePixelRatio` 或自定義倍率。
+```
