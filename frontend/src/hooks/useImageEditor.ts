@@ -32,6 +32,8 @@ const MAX_CONTAINER_WIDTH = 800
 
 interface UseImageEditorOptions {
   minCropSize?: number
+  /** 初始狀態 (用於恢復上次的裁切參數) */
+  initialState?: EditorState
 }
 
 const DEFAULT_STATE: EditorState = {
@@ -54,6 +56,7 @@ export function useImageEditor(options: UseImageEditorOptions | null) {
   optionsRef.current = options
 
   const minCropSize = options?.minCropSize ?? 50
+  const initialStateOption = options?.initialState
 
   // 初始化 (V6 規格)
   const initialize = useCallback(
@@ -83,21 +86,25 @@ export function useImageEditor(options: UseImageEditorOptions | null) {
         containerHeight,
       })
 
-      // 初始裁切框：完全貼合容器
-      setState({
-        imageX: 0,
-        imageY: 0,
-        scale: 1,
-        rotate: 0,
-        cropX: 0,
-        cropY: 0,
-        cropW: containerWidth,
-        cropH: containerHeight,
-      })
+      // 如果有初始狀態，使用它；否則裁切框完全貼合容器
+      if (initialStateOption) {
+        setState(initialStateOption)
+      } else {
+        setState({
+          imageX: 0,
+          imageY: 0,
+          scale: 1,
+          rotate: 0,
+          cropX: 0,
+          cropY: 0,
+          cropW: containerWidth,
+          cropH: containerHeight,
+        })
+      }
 
       initializedRef.current = true
     },
-    []
+    [initialStateOption]
   )
 
   // 設定縮放

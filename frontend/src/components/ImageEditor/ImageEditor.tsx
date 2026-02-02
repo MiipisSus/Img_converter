@@ -6,6 +6,10 @@ interface ImageEditorProps {
   src: string
   /** 狀態變更回調 */
   onStateChange?: (state: EditorState, imageInfo: ImageInfo | null) => void
+  /** 初始狀態 (用於恢復上次的裁切參數) */
+  initialState?: EditorState
+  /** 是否顯示控制面板 */
+  showControls?: boolean
 }
 
 type ResizeHandle = 'nw' | 'ne' | 'sw' | 'se' | 'n' | 's' | 'e' | 'w'
@@ -13,6 +17,8 @@ type ResizeHandle = 'nw' | 'ne' | 'sw' | 'se' | 'n' | 's' | 'e' | 'w'
 export function ImageEditor({
   src,
   onStateChange,
+  initialState,
+  showControls = true,
 }: ImageEditorProps) {
   const imageRef = useRef<HTMLImageElement>(null)
   const [imageLoaded, setImageLoaded] = useState(false)
@@ -23,7 +29,7 @@ export function ImageEditor({
   const dragStartRef = useRef({ x: 0, y: 0, cropX: 0, cropY: 0, cropW: 0, cropH: 0 })
 
   // V5: useImageEditor 不再需要 viewport 尺寸參數
-  const editor = useImageEditor({})
+  const editor = useImageEditor({ initialState })
 
   const {
     state,
@@ -244,7 +250,7 @@ export function ImageEditor({
       </div>
 
       {/* 控制面板 - 獨立於圖片容器 */}
-      {imageInfo && (
+      {showControls && imageInfo && (
         <div className="flex flex-col gap-3 p-3 bg-white rounded shadow">
           {/* Scale 滑桿 */}
           <div className="flex items-center gap-3">
