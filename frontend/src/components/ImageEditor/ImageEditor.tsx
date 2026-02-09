@@ -272,8 +272,8 @@ export function ImageEditor({
             <label className="w-16 text-sm text-gray-600">旋轉</label>
             <input
               type="range"
-              min={0}
-              max={360}
+              min={-180}
+              max={180}
               step={1}
               value={rotate}
               onChange={(e) => setRotate(parseFloat(e.target.value))}

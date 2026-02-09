@@ -8,7 +8,7 @@ export interface EditorState {
   imageX: number      // 圖片中心相對於容器中心的 X 偏移
   imageY: number      // 圖片中心相對於容器中心的 Y 偏移
   scale: number       // 使用者縮放倍率 (1.0+)
-  rotate: number      // 旋轉角度 (0-360)
+  rotate: number      // 旋轉角度 (-180 ~ 180)
 
   // 裁切框 (相對於容器左上角，UI 座標)
   cropX: number
@@ -115,10 +115,11 @@ export function useImageEditor(options: UseImageEditorOptions | null) {
     }))
   }, [])
 
-  // 設定旋轉
+  // 設定旋轉 (-180 ~ 180)
   const setRotate = useCallback((rotate: number) => {
-    const normalized = ((rotate % 360) + 360) % 360
-    setState((prev) => ({ ...prev, rotate: normalized }))
+    // 限制在 -180 ~ 180 範圍
+    const clamped = Math.max(-180, Math.min(180, rotate))
+    setState((prev) => ({ ...prev, rotate: clamped }))
   }, [])
 
   // 設定圖片位置
