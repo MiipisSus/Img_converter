@@ -1,10 +1,9 @@
-import { useState, useCallback, useRef, useEffect } from 'react'
+import { useState, useCallback, useRef } from 'react'
 import { ImageEditor } from './components/ImageEditor'
 import { generateCroppedImage, type CropResult } from './utils/generateCroppedImage'
 import type { EditorState, ImageInfo } from './hooks/useImageEditor'
 
-type AppMode = 'preview' | 'crop'
-type ToolTab = 'crop' | 'resize'
+type AppMode = 'preview' | 'crop' | 'output'
 
 /** 調整尺寸狀態 */
 interface ResizeState {
@@ -58,11 +57,24 @@ function getCroppedOriginalSize(state: EditorState, info: ImageInfo): { width: n
   return { width, height }
 }
 
+/** 輸出設定狀態 (暫態，返回裁切時會重置) */
+interface OutputSettings {
+  targetWidth: number
+  targetHeight: number
+  lockAspectRatio: boolean
+  format: 'png' | 'jpeg' | 'webp'
+  /** 基準尺寸 (進入輸出模式時的裁切尺寸) */
+  baseWidth: number
+  baseHeight: number
+}
+
 function App() {
   const [imageSrc, setImageSrc] = useState<string | null>(null)
   const [mode, setMode] = useState<AppMode>('preview')
-  const [activeTab, setActiveTab] = useState<ToolTab>('crop')
   const [isExporting, setIsExporting] = useState(false)
+
+  // 輸出設定 (暫態)
+  const [outputSettings, setOutputSettings] = useState<OutputSettings | null>(null)
 
   // 全域 Pipeline 狀態
   const [pipelineState, setPipelineState] = useState<PipelineState | null>(null)
@@ -70,6 +82,8 @@ function App() {
   // 當前編輯中的狀態 (裁切模式用)
   const imageRef = useRef<HTMLImageElement | null>(null)
   const currentEditorStateRef = useRef<{ state: EditorState; imageInfo: ImageInfo } | null>(null)
+  // 用於標記是否跳過下次狀態變更的 resize 同步 (進入裁切模式時的自動調整不應覆蓋 resize)
+  const skipNextResizeSyncRef = useRef(false)
 
   const handleFileChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -82,7 +96,7 @@ function App() {
         setImageSrc(src)
         setPipelineState(null)
         setMode('preview')
-        setActiveTab('crop')
+        setOutputSettings(null)
 
         const img = new Image()
         img.src = src
@@ -141,23 +155,75 @@ function App() {
     []
   )
 
-  // 接收編輯器狀態更新
+  // 接收編輯器狀態更新 (裁切模式下，動態更新 resize 目標以匹配裁切框比例)
   const handleStateChange = useCallback((state: EditorState, imageInfo: ImageInfo | null) => {
     if (imageInfo) {
       currentEditorStateRef.current = { state, imageInfo }
-    }
-  }, [])
 
-  // 進入裁切模式
+      // 在裁切模式下，檢查裁切框比例是否改變
+      if (mode === 'crop') {
+        // 如果是進入裁切模式時的自動調整，跳過這次同步
+        if (skipNextResizeSyncRef.current) {
+          skipNextResizeSyncRef.current = false
+          return
+        }
+
+        const croppedSize = getCroppedOriginalSize(state, imageInfo)
+        setPipelineState(prev => {
+          if (!prev) return prev
+
+          const cropAspectRatio = croppedSize.width / croppedSize.height
+          const targetAspectRatio = prev.resize.targetWidth / prev.resize.targetHeight
+
+          // 只有當比例改變時才更新 resize 目標 (防止扭曲)
+          // 保留使用者設定的縮放尺寸，只在比例變化時覆蓋
+          if (Math.abs(cropAspectRatio - targetAspectRatio) > 0.01) {
+            return {
+              ...prev,
+              resize: {
+                ...prev.resize,
+                // 使用者手動調整了裁切比例，更新 resize 目標為裁切尺寸
+                targetWidth: croppedSize.width,
+                targetHeight: croppedSize.height,
+                croppedWidth: croppedSize.width,
+                croppedHeight: croppedSize.height,
+                // 比例改變後，清除 active 狀態 (用戶需要重新設定縮放)
+                active: false,
+              },
+            }
+          }
+
+          // 比例相同，只更新基準尺寸
+          if (
+            prev.resize.croppedWidth !== croppedSize.width ||
+            prev.resize.croppedHeight !== croppedSize.height
+          ) {
+            return {
+              ...prev,
+              resize: {
+                ...prev.resize,
+                croppedWidth: croppedSize.width,
+                croppedHeight: croppedSize.height,
+              },
+            }
+          }
+
+          return prev
+        })
+      }
+    }
+  }, [mode])
+
+  // 進入裁切模式 (預設採用 resize 設定的比例作為引導)
   const handleEnterCropMode = useCallback(() => {
-    // 如果有鎖定比例，調整初始裁切框以符合比例
-    if (pipelineState?.resize.lockAspectRatio) {
+    // 如果有 resize 設定，調整初始裁切框以符合該比例
+    if (pipelineState) {
       const { editorState, imageInfo, resize } = pipelineState
       const targetAspectRatio = resize.targetWidth / resize.targetHeight
       const currentAspectRatio = editorState.cropW / editorState.cropH
 
-      // 如果比例不符，調整裁切框
-      if (Math.abs(targetAspectRatio - currentAspectRatio) > 0.001) {
+      // 如果比例不符，調整裁切框以符合 resize 比例
+      if (Math.abs(targetAspectRatio - currentAspectRatio) > 0.01) {
         const { containerWidth, containerHeight } = imageInfo
         let newCropW: number, newCropH: number
 
@@ -175,6 +241,9 @@ function App() {
         // 置中
         const newCropX = (containerWidth - newCropW) / 2
         const newCropY = (containerHeight - newCropH) / 2
+
+        // 標記跳過下次的 resize 同步 (這是自動調整，不是使用者手動操作)
+        skipNextResizeSyncRef.current = true
 
         // 更新 pipelineState 中的 editorState
         setPipelineState(prev => ({
@@ -203,10 +272,11 @@ function App() {
       // 計算新的裁切後尺寸
       const croppedSize = getCroppedOriginalSize(state, imageInfo)
 
-      // 檢查是否需要縮放 (使用之前的 resize 設定，但尺寸需要更新為新的裁切基準)
+      // 如果有 active resize，傳遞 resize 參數
       const prevResize = pipelineState?.resize
-      const resizeOptions = prevResize?.active
-        ? { targetWidth: prevResize.targetWidth, targetHeight: prevResize.targetHeight }
+      const hasActiveResize = prevResize?.active ?? false
+      const resizeOptions = hasActiveResize
+        ? { targetWidth: prevResize!.targetWidth, targetHeight: prevResize!.targetHeight }
         : {}
 
       const result: CropResult = await generateCroppedImage(
@@ -216,28 +286,34 @@ function App() {
         resizeOptions
       )
 
-      // 判斷使用者是否有自訂 resize 目標 (與之前的 croppedSize 不同)
-      const hadCustomResize = prevResize && (
-        prevResize.targetWidth !== prevResize.croppedWidth ||
-        prevResize.targetHeight !== prevResize.croppedHeight
-      )
+      // 確保 resize 目標與裁切框比例一致 (防止扭曲)
+      setPipelineState(prev => {
+        const prevResize = prev?.resize
+        const cropAspectRatio = croppedSize.width / croppedSize.height
+        const targetAspectRatio = prevResize
+          ? prevResize.targetWidth / prevResize.targetHeight
+          : cropAspectRatio
 
-      setPipelineState({
-        editorState: { ...state },
-        imageInfo: { ...imageInfo },
-        previewUrl: result.dataUrl,
-        resize: {
-          // 如果使用者有自訂 resize，保留其設定；否則使用新的裁切尺寸
-          active: hadCustomResize ? prevResize.active : false,
-          targetWidth: hadCustomResize ? prevResize.targetWidth : croppedSize.width,
-          targetHeight: hadCustomResize ? prevResize.targetHeight : croppedSize.height,
-          lockAspectRatio: prevResize?.lockAspectRatio ?? true,
-          // 永遠更新基準尺寸為新的裁切尺寸
-          croppedWidth: croppedSize.width,
-          croppedHeight: croppedSize.height,
-        },
-        outputWidth: result.width,
-        outputHeight: result.height,
+        // 如果比例相同且有 active resize，保留用戶的縮放設定
+        const ratioMatches = Math.abs(cropAspectRatio - targetAspectRatio) < 0.01
+        const keepActiveResize = ratioMatches && (prevResize?.active ?? false)
+
+        return {
+          editorState: { ...state },
+          imageInfo: { ...imageInfo },
+          previewUrl: result.dataUrl,
+          resize: {
+            active: keepActiveResize,
+            // 如果比例匹配且有 active resize，保留用戶設定的尺寸；否則使用裁切尺寸
+            targetWidth: keepActiveResize ? prevResize!.targetWidth : croppedSize.width,
+            targetHeight: keepActiveResize ? prevResize!.targetHeight : croppedSize.height,
+            lockAspectRatio: prevResize?.lockAspectRatio ?? true,
+            croppedWidth: croppedSize.width,
+            croppedHeight: croppedSize.height,
+          },
+          outputWidth: result.width,
+          outputHeight: result.height,
+        }
       })
 
       console.log('導出尺寸:', result.width, '×', result.height)
@@ -249,8 +325,107 @@ function App() {
     }
   }, [isExporting, pipelineState?.resize])
 
-  // 返回
+  // 返回 (從裁切模式)
   const handleCancelCrop = useCallback(() => {
+    setMode('preview')
+  }, [])
+
+  // === 輸出模式相關 ===
+
+  // 進入輸出模式
+  const handleEnterOutputMode = useCallback(async () => {
+    if (!imageRef.current || !pipelineState || isExporting) return
+
+    setIsExporting(true)
+    try {
+      const { editorState, imageInfo } = pipelineState
+
+      // 計算裁切後的原始像素尺寸
+      const croppedSize = getCroppedOriginalSize(editorState, imageInfo)
+
+      // 生成預覽圖
+      const result = await generateCroppedImage(
+        imageRef.current,
+        editorState,
+        imageInfo,
+        {}
+      )
+
+      // 更新 pipelineState 預覽
+      setPipelineState(prev => ({
+        ...prev!,
+        previewUrl: result.dataUrl,
+        outputWidth: result.width,
+        outputHeight: result.height,
+      }))
+
+      // 初始化輸出設定 (暫態)
+      setOutputSettings({
+        targetWidth: croppedSize.width,
+        targetHeight: croppedSize.height,
+        lockAspectRatio: true, // 強制鎖定比例
+        format: 'png',
+        baseWidth: croppedSize.width,
+        baseHeight: croppedSize.height,
+      })
+
+      setMode('output')
+    } catch (error) {
+      console.error('進入輸出模式失敗:', error)
+    } finally {
+      setIsExporting(false)
+    }
+  }, [isExporting, pipelineState])
+
+  // 更新輸出設定
+  const handleUpdateOutputSettings = useCallback((updates: Partial<OutputSettings>) => {
+    setOutputSettings(prev => {
+      if (!prev) return prev
+      return { ...prev, ...updates }
+    })
+  }, [])
+
+  // 套用輸出設定並生成最終圖片
+  const handleApplyOutput = useCallback(async () => {
+    if (!imageRef.current || !pipelineState || !outputSettings || isExporting) return
+
+    setIsExporting(true)
+    try {
+      const { editorState, imageInfo } = pipelineState
+      const { targetWidth, targetHeight, format } = outputSettings
+
+      // 根據設定生成最終圖片
+      const result = await generateCroppedImage(
+        imageRef.current,
+        editorState,
+        imageInfo,
+        {
+          targetWidth,
+          targetHeight,
+          format: format === 'png' ? 'image/png' : format === 'jpeg' ? 'image/jpeg' : 'image/webp',
+        }
+      )
+
+      // 更新預覽
+      setPipelineState(prev => ({
+        ...prev!,
+        previewUrl: result.dataUrl,
+        outputWidth: result.width,
+        outputHeight: result.height,
+      }))
+
+      console.log('輸出尺寸:', result.width, '×', result.height)
+    } catch (error) {
+      console.error('套用輸出設定失敗:', error)
+    } finally {
+      setIsExporting(false)
+    }
+  }, [isExporting, pipelineState, outputSettings])
+
+  // 返回裁切模式 (清除輸出設定)
+  const handleReturnFromOutput = useCallback(() => {
+    // 重置輸出設定 (暫態清除)
+    setOutputSettings(null)
     setMode('preview')
   }, [])
 
@@ -259,7 +434,7 @@ function App() {
     setImageSrc(null)
     setPipelineState(null)
     setMode('preview')
-    setActiveTab('crop')
+    setOutputSettings(null)
   }, [])
 
   // === 旋轉/翻轉 ===
@@ -267,7 +442,8 @@ function App() {
     transformFn: (prev: EditorState, oldInfo: ImageInfo) => {
       newState: EditorState;
       newInfo: ImageInfo
-    }
+    },
+    is90Rotation = false
   ) => {
     if (!imageRef.current || !pipelineState || isExporting) return
 
@@ -275,17 +451,36 @@ function App() {
 
     try {
       const { newState, newInfo } = transformFn(pipelineState.editorState, pipelineState.imageInfo)
-      const result = await generateCroppedImage(imageRef.current, newState, newInfo)
 
-      // 更新 resize 基準值
+      // 計算新的裁切後尺寸
       const croppedSize = getCroppedOriginalSize(newState, newInfo)
-
-      // 判斷使用者是否有自訂 resize 目標
       const prevResize = pipelineState.resize
-      const hadCustomResize = prevResize && (
-        prevResize.targetWidth !== prevResize.croppedWidth ||
-        prevResize.targetHeight !== prevResize.croppedHeight
-      )
+
+      // 計算新的 resize 目標尺寸
+      // 對於 90° 旋轉：如果有 active resize，交換寬高
+      // 對於翻轉：保持原有尺寸
+      // 始終確保 resize 目標與裁切框比例一致
+      let newTargetWidth = croppedSize.width
+      let newTargetHeight = croppedSize.height
+
+      if (prevResize.active) {
+        if (is90Rotation) {
+          // 90° 旋轉時交換目標寬高
+          newTargetWidth = prevResize.targetHeight
+          newTargetHeight = prevResize.targetWidth
+        } else {
+          // 翻轉時保持原尺寸 (翻轉不改變比例)
+          newTargetWidth = prevResize.targetWidth
+          newTargetHeight = prevResize.targetHeight
+        }
+      }
+
+      // 傳遞更新後的 resize 參數給 generateCroppedImage
+      const resizeOptions = prevResize.active
+        ? { targetWidth: newTargetWidth, targetHeight: newTargetHeight }
+        : {}
+
+      const result = await generateCroppedImage(imageRef.current, newState, newInfo, resizeOptions)
 
       setPipelineState(prev => ({
         editorState: newState,
@@ -293,10 +488,9 @@ function App() {
         previewUrl: result.dataUrl,
         resize: {
           ...prev!.resize,
-          // 如果使用者有自訂 resize，保留其設定；否則使用新的裁切尺寸
-          targetWidth: hadCustomResize ? prevResize.targetWidth : croppedSize.width,
-          targetHeight: hadCustomResize ? prevResize.targetHeight : croppedSize.height,
-          // 永遠更新基準尺寸
+          // 更新 resize 目標以匹配新的裁切比例
+          targetWidth: newTargetWidth,
+          targetHeight: newTargetHeight,
           croppedWidth: croppedSize.width,
           croppedHeight: croppedSize.height,
         },
@@ -373,7 +567,7 @@ function App() {
       }
 
       return { newState, newInfo }
-    })
+    }, true) // is90Rotation = true
   }, [applyTransformAndGenerate])
 
   // 翻轉
@@ -392,54 +586,6 @@ function App() {
   const handleRotateRight = useCallback(() => handleRotate('right'), [handleRotate])
   const handleFlipX = useCallback(() => handleFlip('x'), [handleFlip])
   const handleFlipY = useCallback(() => handleFlip('y'), [handleFlip])
-
-  // === Resize 狀態更新 ===
-  const updateResizeState = useCallback((updates: Partial<ResizeState>) => {
-    setPipelineState(prev => {
-      if (!prev) return prev
-      return {
-        ...prev,
-        resize: {
-          ...prev.resize,
-          ...updates,
-        },
-      }
-    })
-  }, [])
-
-  // === 套用 Resize ===
-  const applyResize = useCallback(async () => {
-    if (!imageRef.current || !pipelineState || isExporting) return
-
-    const { resize, editorState, imageInfo } = pipelineState
-    if (!resize.active) return
-
-    setIsExporting(true)
-    try {
-      const result = await generateCroppedImage(
-        imageRef.current,
-        editorState,
-        imageInfo,
-        {
-          targetWidth: resize.targetWidth,
-          targetHeight: resize.targetHeight,
-        }
-      )
-
-      setPipelineState(prev => ({
-        ...prev!,
-        previewUrl: result.dataUrl,
-        outputWidth: result.width,
-        outputHeight: result.height,
-      }))
-
-      console.log('縮放後尺寸:', result.width, '×', result.height)
-    } catch (error) {
-      console.error('縮放失敗:', error)
-    } finally {
-      setIsExporting(false)
-    }
-  }, [isExporting, pipelineState])
 
   // 當前狀態
   const currentFlipX = pipelineState?.editorState.flipX ?? false
@@ -470,53 +616,20 @@ function App() {
         <div className="flex gap-6 items-start">
           {/* 左側工具面板 */}
           <div className="flex flex-col gap-4 w-52">
-            {mode === 'preview' ? (
+            {mode === 'preview' && (
               <>
-                {/* 分頁標籤 */}
-                <div className="flex border-b border-gray-200">
-                  <button
-                    onClick={() => setActiveTab('crop')}
-                    className={`flex-1 py-2 text-sm font-medium transition-colors ${
-                      activeTab === 'crop'
-                        ? 'text-blue-600 border-b-2 border-blue-600'
-                        : 'text-gray-500 hover:text-gray-700'
-                    }`}
-                  >
-                    裁切
-                  </button>
-                  <button
-                    onClick={() => setActiveTab('resize')}
-                    className={`flex-1 py-2 text-sm font-medium transition-colors ${
-                      activeTab === 'resize'
-                        ? 'text-blue-600 border-b-2 border-blue-600'
-                        : 'text-gray-500 hover:text-gray-700'
-                    }`}
-                  >
-                    調整尺寸
-                  </button>
-                </div>
-
-                {/* 分頁內容 */}
-                {activeTab === 'crop' ? (
-                  <CropToolPanel
-                    onEnterCropMode={handleEnterCropMode}
-                    onRotateLeft={handleRotateLeft}
-                    onRotateRight={handleRotateRight}
-                    onFlipX={handleFlipX}
-                    onFlipY={handleFlipY}
-                    flipX={currentFlipX}
-                    flipY={currentFlipY}
-                    isExporting={isExporting}
-                    pipelineState={pipelineState}
-                  />
-                ) : (
-                  <ResizeToolPanel
-                    pipelineState={pipelineState}
-                    onUpdateResize={updateResizeState}
-                    onApplyResize={applyResize}
-                    isExporting={isExporting}
-                  />
-                )}
+                <CropToolPanel
+                  onEnterCropMode={handleEnterCropMode}
+                  onEnterOutputMode={handleEnterOutputMode}
+                  onRotateLeft={handleRotateLeft}
+                  onRotateRight={handleRotateRight}
+                  onFlipX={handleFlipX}
+                  onFlipY={handleFlipY}
+                  flipX={currentFlipX}
+                  flipY={currentFlipY}
+                  isExporting={isExporting}
+                  pipelineState={pipelineState}
+                />
 
                 {/* 選擇其他圖片 */}
                 <button
@@ -526,10 +639,22 @@ function App() {
                   選擇其他圖片
                 </button>
               </>
-            ) : (
+            )}
+
+            {mode === 'crop' && (
               <CropControlPanel
                 onConfirm={handleConfirmCrop}
                 onCancel={handleCancelCrop}
+                isExporting={isExporting}
+              />
+            )}
+
+            {mode === 'output' && outputSettings && (
+              <OutputSettingsPanel
+                settings={outputSettings}
+                onUpdateSettings={handleUpdateOutputSettings}
+                onApply={handleApplyOutput}
+                onReturn={handleReturnFromOutput}
                 isExporting={isExporting}
               />
             )}
@@ -537,13 +662,14 @@ function App() {
 
           {/* 右側工作區 */}
           <div className="flex flex-col items-center gap-4">
-            {mode === 'preview' ? (
+            {(mode === 'preview' || mode === 'output') ? (
               <PreviewWorkspace
                 previewUrl={pipelineState?.previewUrl ?? null}
                 originalSrc={imageSrc}
                 isProcessing={isExporting}
                 outputWidth={pipelineState?.outputWidth ?? 400}
                 outputHeight={pipelineState?.outputHeight ?? 300}
+                isOutputMode={mode === 'output'}
               />
             ) : (
               pipelineState && (
@@ -552,11 +678,6 @@ function App() {
                   onStateChange={handleStateChange}
                   initialState={pipelineState.editorState}
                   showControls={true}
-                  lockedAspectRatio={
-                    pipelineState.resize.lockAspectRatio
-                      ? pipelineState.resize.targetWidth / pipelineState.resize.targetHeight
-                      : undefined
-                  }
                 />
               )
             )}
@@ -570,6 +691,7 @@ function App() {
 /** 裁切工具面板 */
 function CropToolPanel({
   onEnterCropMode,
+  onEnterOutputMode,
   onRotateLeft,
   onRotateRight,
   onFlipX,
@@ -580,6 +702,7 @@ function CropToolPanel({
   pipelineState,
 }: {
   onEnterCropMode: () => void
+  onEnterOutputMode: () => void
   onRotateLeft: () => void
   onRotateRight: () => void
   onFlipX: () => void
@@ -598,6 +721,15 @@ function CropToolPanel({
         className="px-4 py-3 bg-blue-500 hover:bg-blue-600 disabled:bg-gray-300 text-white rounded-lg transition-colors font-medium"
       >
         進入裁切模式
+      </button>
+
+      {/* 輸出圖片按鈕 */}
+      <button
+        onClick={onEnterOutputMode}
+        disabled={isExporting || !pipelineState}
+        className="px-4 py-3 bg-green-500 hover:bg-green-600 disabled:bg-gray-300 text-white rounded-lg transition-colors font-medium"
+      >
+        輸出圖片
       </button>
 
       {/* 旋轉/翻轉工具 */}
@@ -660,147 +792,110 @@ function CropToolPanel({
   )
 }
 
-/** 調整尺寸工具面板 */
-function ResizeToolPanel({
-  pipelineState,
-  onUpdateResize,
-  onApplyResize,
+/** 輸出設定面板 */
+function OutputSettingsPanel({
+  settings,
+  onUpdateSettings,
+  onApply,
+  onReturn,
   isExporting,
 }: {
-  pipelineState: PipelineState | null
-  onUpdateResize: (updates: Partial<ResizeState>) => void
-  onApplyResize: () => void
+  settings: OutputSettings
+  onUpdateSettings: (updates: Partial<OutputSettings>) => void
+  onApply: () => void
+  onReturn: () => void
   isExporting: boolean
 }) {
   // 本地輸入狀態 (字串，允許空值)
-  const [widthInput, setWidthInput] = useState('')
-  const [heightInput, setHeightInput] = useState('')
+  const [widthInput, setWidthInput] = useState(String(settings.targetWidth))
+  const [heightInput, setHeightInput] = useState(String(settings.targetHeight))
   const [widthError, setWidthError] = useState(false)
   const [heightError, setHeightError] = useState(false)
 
-  // 追蹤是否正在輸入 (避免外部同步覆蓋使用者輸入)
-  const isTypingRef = useRef(false)
+  const { baseWidth, baseHeight, lockAspectRatio, format } = settings
 
-  // 同步外部狀態到本地輸入
-  const targetWidth = pipelineState?.resize.targetWidth
-  const targetHeight = pipelineState?.resize.targetHeight
-
-  useEffect(() => {
-    if (!isTypingRef.current && targetWidth !== undefined) {
-      setWidthInput(String(targetWidth))
-      setWidthError(false)
-    }
-  }, [targetWidth])
-
-  useEffect(() => {
-    if (!isTypingRef.current && targetHeight !== undefined) {
-      setHeightInput(String(targetHeight))
-      setHeightError(false)
-    }
-  }, [targetHeight])
-
-  if (!pipelineState) {
-    return <p className="text-sm text-gray-400">請先載入圖片</p>
-  }
-
-  const { resize } = pipelineState
-  // 使用 resize 中儲存的基準尺寸，而非即時計算
-  const croppedSize = { width: resize.croppedWidth, height: resize.croppedHeight }
-
-  // 處理寬度輸入變更 (允許空值)
+  // 處理寬度輸入變更
   const handleWidthInputChange = (value: string) => {
-    isTypingRef.current = true
     setWidthInput(value)
-    setWidthError(false) // 輸入時清除錯誤
+    setWidthError(false)
 
     const num = parseInt(value)
     if (!isNaN(num) && num >= 1) {
-      if (resize.lockAspectRatio) {
-        const aspectRatio = croppedSize.height / croppedSize.width
+      if (lockAspectRatio) {
+        const aspectRatio = baseHeight / baseWidth
         const newHeight = Math.round(num * aspectRatio)
         setHeightInput(String(Math.max(1, newHeight)))
-        onUpdateResize({
+        onUpdateSettings({
           targetWidth: num,
           targetHeight: Math.max(1, newHeight),
-          active: true,
         })
       } else {
-        onUpdateResize({ targetWidth: num, active: true })
+        onUpdateSettings({ targetWidth: num })
       }
     }
   }
 
-  // 處理高度輸入變更 (允許空值)
+  // 處理高度輸入變更
   const handleHeightInputChange = (value: string) => {
-    isTypingRef.current = true
     setHeightInput(value)
-    setHeightError(false) // 輸入時清除錯誤
+    setHeightError(false)
 
     const num = parseInt(value)
     if (!isNaN(num) && num >= 1) {
-      if (resize.lockAspectRatio) {
-        const aspectRatio = croppedSize.width / croppedSize.height
+      if (lockAspectRatio) {
+        const aspectRatio = baseWidth / baseHeight
         const newWidth = Math.round(num * aspectRatio)
         setWidthInput(String(Math.max(1, newWidth)))
-        onUpdateResize({
+        onUpdateSettings({
           targetWidth: Math.max(1, newWidth),
           targetHeight: num,
-          active: true,
         })
       } else {
-        onUpdateResize({ targetHeight: num, active: true })
+        onUpdateSettings({ targetHeight: num })
       }
     }
   }
 
   // 寬度失焦驗證
   const handleWidthBlur = () => {
-    isTypingRef.current = false
     const num = parseInt(widthInput)
     if (isNaN(num) || num < 1 || widthInput.trim() === '') {
       setWidthError(true)
-      // 恢復為有效值
-      setWidthInput(String(resize.targetWidth))
+      setWidthInput(String(settings.targetWidth))
     }
   }
 
   // 高度失焦驗證
   const handleHeightBlur = () => {
-    isTypingRef.current = false
     const num = parseInt(heightInput)
     if (isNaN(num) || num < 1 || heightInput.trim() === '') {
       setHeightError(true)
-      // 恢復為有效值
-      setHeightInput(String(resize.targetHeight))
+      setHeightInput(String(settings.targetHeight))
     }
   }
 
-  // 重設為原始裁切尺寸
+  // 重設為原始尺寸
   const handleResetSize = () => {
-    isTypingRef.current = false
-    setWidthInput(String(croppedSize.width))
-    setHeightInput(String(croppedSize.height))
+    setWidthInput(String(baseWidth))
+    setHeightInput(String(baseHeight))
     setWidthError(false)
     setHeightError(false)
-    onUpdateResize({
-      targetWidth: croppedSize.width,
-      targetHeight: croppedSize.height,
-      active: false,
+    onUpdateSettings({
+      targetWidth: baseWidth,
+      targetHeight: baseHeight,
     })
   }
 
-  // 切換比例鎖定
-  const handleToggleLock = () => {
-    onUpdateResize({ lockAspectRatio: !resize.lockAspectRatio })
-  }
-
-  const isModified = resize.targetWidth !== croppedSize.width || resize.targetHeight !== croppedSize.height
+  const isModified = settings.targetWidth !== baseWidth || settings.targetHeight !== baseHeight
   const hasError = widthError || heightError
 
   return (
     <div className="flex flex-col gap-3">
+      <p className="text-sm text-gray-600 font-medium">輸出設定</p>
+
+      {/* 調整尺寸 */}
       <div className="p-3 bg-white rounded-lg shadow">
-        <p className="text-xs text-gray-500 mb-3 font-medium">目標尺寸</p>
+        <p className="text-xs text-gray-500 mb-3 font-medium">調整尺寸</p>
 
         {/* 寬度輸入 */}
         <div className="flex items-center gap-2 mb-2">
@@ -843,50 +938,76 @@ function ResizeToolPanel({
           <p className="text-xs text-red-500 mb-2">尺寸不得為空或小於 1</p>
         )}
 
-        {/* 鎖定比例開關 */}
-        <div className="flex items-center justify-between mb-3">
-          <span className="text-sm text-gray-600">鎖定比例</span>
-          <button
-            onClick={handleToggleLock}
-            className={`relative w-9 h-5 rounded-full transition-colors flex-shrink-0 ${
-              resize.lockAspectRatio ? 'bg-blue-500' : 'bg-gray-300'
-            }`}
-          >
-            <span
-              className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${
-                resize.lockAspectRatio ? 'translate-x-4' : 'translate-x-0'
-              }`}
-            />
-          </button>
+        {/* 比例鎖定提示 (強制鎖定，不可解除) */}
+        <div className="flex items-center gap-2 mb-3 text-xs text-gray-400">
+          <span>比例已鎖定</span>
+          <span className="text-gray-300">|</span>
+          <span>{baseWidth} : {baseHeight}</span>
         </div>
 
-        {/* 套用按鈕 */}
-        <button
-          onClick={onApplyResize}
-          disabled={!isModified || isExporting}
-          className="w-full px-3 py-2 bg-blue-500 hover:bg-blue-600 disabled:bg-gray-300 text-white rounded transition-colors font-medium disabled:cursor-not-allowed"
-        >
-          {isExporting ? '處理中...' : '套用尺寸'}
-        </button>
-
         {/* 重設按鈕 */}
-        <button
-          onClick={handleResetSize}
-          disabled={!isModified || isExporting}
-          className="w-full px-3 py-1.5 text-sm text-gray-600 hover:text-gray-800 border border-gray-300 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-        >
-          重設為原始尺寸
-        </button>
+        {isModified && (
+          <button
+            onClick={handleResetSize}
+            className="w-full px-3 py-1.5 text-sm text-gray-600 hover:text-gray-800 border border-gray-300 rounded transition-colors"
+          >
+            重設為原始尺寸
+          </button>
+        )}
+      </div>
+
+      {/* 匯出格式 */}
+      <div className="p-3 bg-white rounded-lg shadow">
+        <p className="text-xs text-gray-500 mb-3 font-medium">匯出格式</p>
+
+        <div className="flex gap-2">
+          {(['png', 'jpeg', 'webp'] as const).map((fmt) => (
+            <button
+              key={fmt}
+              onClick={() => onUpdateSettings({ format: fmt })}
+              className={`flex-1 px-2 py-1.5 text-sm rounded transition-colors ${
+                format === fmt
+                  ? 'bg-blue-500 text-white'
+                  : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+              }`}
+            >
+              {fmt.toUpperCase()}
+            </button>
+          ))}
+        </div>
+
+        {/* 目標 KB 壓縮 (預留位置) */}
+        <div className="mt-3 p-2 bg-gray-50 rounded text-xs text-gray-400">
+          目標 KB 壓縮 (即將推出)
+        </div>
       </div>
 
       {/* 狀態資訊 */}
       <div className="text-xs text-gray-500 font-mono space-y-1 p-2 bg-gray-50 rounded">
-        <div>原始尺寸: {croppedSize.width} × {croppedSize.height} px</div>
+        <div>原始尺寸: {baseWidth} × {baseHeight} px</div>
         {isModified && (
           <div className="text-blue-600">
-            縮放至: {resize.targetWidth} × {resize.targetHeight} px
+            輸出尺寸: {settings.targetWidth} × {settings.targetHeight} px
           </div>
         )}
+      </div>
+
+      {/* 操作按鈕 */}
+      <div className="flex flex-col gap-2 mt-2">
+        <button
+          onClick={onApply}
+          disabled={isExporting}
+          className="px-4 py-2 bg-green-500 hover:bg-green-600 disabled:bg-gray-300 text-white rounded-lg transition-colors font-medium"
+        >
+          {isExporting ? '處理中...' : '套用並預覽'}
+        </button>
+        <button
+          onClick={onReturn}
+          disabled={isExporting}
+          className="px-4 py-2 text-gray-600 hover:text-gray-800 border border-gray-300 rounded-lg transition-colors"
+        >
+          返回裁切
+        </button>
       </div>
     </div>
   )
@@ -909,12 +1030,14 @@ function PreviewWorkspace({
   isProcessing,
   outputWidth,
   outputHeight,
+  isOutputMode = false,
 }: {
   previewUrl: string | null
   originalSrc: string
   isProcessing?: boolean
   outputWidth: number
   outputHeight: number
+  isOutputMode?: boolean
 }) {
   const displayUrl = previewUrl ?? originalSrc
   const hasCropResult = previewUrl !== null
@@ -923,6 +1046,13 @@ function PreviewWorkspace({
   const M = calculatePreviewMultiplier(outputWidth)
   const displayWidth = Math.round(outputWidth * M)
   const displayHeight = Math.round(outputHeight * M)
+
+  // 根據模式決定標題
+  const getTitle = () => {
+    if (isOutputMode) return '最終結果預覽'
+    if (hasCropResult) return '處理結果預覽'
+    return '原始圖片'
+  }
 
   return (
     <div className="flex flex-col items-center gap-2 p-4 bg-white rounded-lg shadow min-w-[400px] min-h-[300px] relative">
@@ -933,7 +1063,7 @@ function PreviewWorkspace({
       )}
 
       <p className="text-sm text-gray-600 mb-2">
-        {hasCropResult ? '處理結果預覽' : '原始圖片'}
+        {getTitle()}
       </p>
       <div
         className="relative"

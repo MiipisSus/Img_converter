@@ -261,8 +261,8 @@ export function ImageEditor({
                 />
               ))}
 
-              {/* 四邊 Handles (當比例鎖定時隱藏) */}
-              {!lockedAspectRatio && (['n', 's', 'e', 'w'] as const).map((handle) => (
+              {/* 四邊 Handles */}
+              {(['n', 's', 'e', 'w'] as const).map((handle) => (
                 <div
                   key={handle}
                   className="absolute bg-white"
