@@ -66,6 +66,14 @@ interface OutputSettings {
   /** 基準尺寸 (進入輸出模式時的裁切尺寸) */
   baseWidth: number
   baseHeight: number
+  /** 品質 (0-100, 僅 JPEG/WebP 有效) */
+  quality: number
+  /** 目標檔案大小 (KB)，null 表示不限制 */
+  targetKB: number | null
+  /** 是否啟用目標 KB 限制 */
+  enableTargetKB: boolean
+  /** 上次導出的檔案大小 (bytes) */
+  lastExportSize: number | null
 }
 
 function App() {
@@ -363,10 +371,14 @@ function App() {
       setOutputSettings({
         targetWidth: croppedSize.width,
         targetHeight: croppedSize.height,
-        lockAspectRatio: true, // 強制鎖定比例
+        lockAspectRatio: true,
         format: 'png',
         baseWidth: croppedSize.width,
         baseHeight: croppedSize.height,
+        quality: 92,
+        targetKB: null,
+        enableTargetKB: false,
+        lastExportSize: null,
       })
 
       setMode('output')
@@ -392,19 +404,70 @@ function App() {
     setIsExporting(true)
     try {
       const { editorState, imageInfo } = pipelineState
-      const { targetWidth, targetHeight, format } = outputSettings
+      const { targetWidth, targetHeight, format, quality, enableTargetKB, targetKB } = outputSettings
 
-      // 根據設定生成最終圖片
-      const result = await generateCroppedImage(
-        imageRef.current,
-        editorState,
-        imageInfo,
-        {
-          targetWidth,
-          targetHeight,
-          format: format === 'png' ? 'image/png' : format === 'jpeg' ? 'image/jpeg' : 'image/webp',
+      const mimeType = format === 'png' ? 'image/png' : format === 'jpeg' ? 'image/jpeg' : 'image/webp'
+
+      // 如果啟用目標 KB 限制，使用迭代壓縮
+      let result: Awaited<ReturnType<typeof generateCroppedImage>>
+      let finalQuality = quality / 100
+
+      if (enableTargetKB && targetKB && format !== 'png') {
+        // 迭代壓縮以達到目標大小
+        const targetBytes = targetKB * 1024
+        let minQuality = 0.1
+        let maxQuality = 1.0
+        let attempts = 0
+        const maxAttempts = 10
+
+        // 先嘗試最高品質
+        result = await generateCroppedImage(
+          imageRef.current,
+          editorState,
+          imageInfo,
+          { targetWidth, targetHeight, format: mimeType, quality: maxQuality }
+        )
+
+        // 如果最高品質已經符合目標，直接使用
+        if (result.blob.size <= targetBytes) {
+          finalQuality = maxQuality
+        } else {
+          // 二分搜尋找到合適的品質
+          while (attempts < maxAttempts && maxQuality - minQuality > 0.02) {
+            const midQuality = (minQuality + maxQuality) / 2
+            result = await generateCroppedImage(
+              imageRef.current,
+              editorState,
+              imageInfo,
+              { targetWidth, targetHeight, format: mimeType, quality: midQuality }
+            )
+
+            if (result.blob.size > targetBytes) {
+              maxQuality = midQuality
+            } else {
+              minQuality = midQuality
+            }
+            attempts++
+          }
+          finalQuality = minQuality
+
+          // 最終生成
+          result = await generateCroppedImage(
+            imageRef.current,
+            editorState,
+            imageInfo,
+            { targetWidth, targetHeight, format: mimeType, quality: finalQuality }
+          )
         }
-      )
+      } else {
+        // 不限制大小，直接使用指定品質
+        result = await generateCroppedImage(
+          imageRef.current,
+          editorState,
+          imageInfo,
+          { targetWidth, targetHeight, format: mimeType, quality: finalQuality }
+        )
+      }
 
       // 更新預覽
       setPipelineState(prev => ({
@@ -414,7 +477,13 @@ function App() {
         outputHeight: result.height,
       }))
 
-      console.log('輸出尺寸:', result.width, '×', result.height)
+      // 更新檔案大小資訊
+      setOutputSettings(prev => prev ? {
+        ...prev,
+        lastExportSize: result.blob.size,
+      } : prev)
+
+      console.log('輸出尺寸:', result.width, '×', result.height, '檔案大小:', (result.blob.size / 1024).toFixed(1), 'KB')
     } catch (error) {
       console.error('套用輸出設定失敗:', error)
     } finally {
@@ -944,11 +1013,26 @@ function OutputSettingsPanel({
           <p className="text-xs text-red-500 mb-2">尺寸不得為空或小於 1</p>
         )}
 
-        {/* 比例鎖定提示 (強制鎖定，不可解除) */}
-        <div className="flex items-center gap-2 mb-3 text-xs text-gray-400">
-          <span>比例已鎖定</span>
-          <span className="text-gray-300">|</span>
-          <span>{baseWidth} : {baseHeight}</span>
+        {/* 鎖定比例開關 */}
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-gray-600">鎖定比例</span>
+            {lockAspectRatio && (
+              <span className="text-xs text-gray-400">({baseWidth} : {baseHeight})</span>
+            )}
+          </div>
+          <button
+            onClick={() => onUpdateSettings({ lockAspectRatio: !lockAspectRatio })}
+            className={`relative w-9 h-5 rounded-full transition-colors flex-shrink-0 ${
+              lockAspectRatio ? 'bg-blue-500' : 'bg-gray-300'
+            }`}
+          >
+            <span
+              className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${
+                lockAspectRatio ? 'translate-x-4' : 'translate-x-0'
+              }`}
+            />
+          </button>
         </div>
 
         {/* 重設按鈕 */}
@@ -966,7 +1050,7 @@ function OutputSettingsPanel({
       <div className="p-3 bg-white rounded-lg shadow">
         <p className="text-xs text-gray-500 mb-3 font-medium">匯出格式</p>
 
-        <div className="flex gap-2">
+        <div className="flex gap-2 mb-3">
           {(['png', 'jpeg', 'webp'] as const).map((fmt) => (
             <button
               key={fmt}
@@ -982,10 +1066,73 @@ function OutputSettingsPanel({
           ))}
         </div>
 
-        {/* 目標 KB 壓縮 (預留位置) */}
-        <div className="mt-3 p-2 bg-gray-50 rounded text-xs text-gray-400">
-          目標 KB 壓縮 (即將推出)
-        </div>
+        {/* 品質滑桿 (僅 JPEG/WebP) */}
+        {format !== 'png' && (
+          <div className="mb-3">
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-xs text-gray-500">品質</span>
+              <span className="text-xs text-gray-600 font-medium">{settings.quality}%</span>
+            </div>
+            <input
+              type="range"
+              min={10}
+              max={100}
+              step={1}
+              value={settings.quality}
+              onChange={(e) => onUpdateSettings({ quality: parseInt(e.target.value) })}
+              className="w-full h-1.5 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-blue-500"
+            />
+            <div className="flex justify-between text-[10px] text-gray-400 mt-0.5">
+              <span>小檔案</span>
+              <span>高品質</span>
+            </div>
+          </div>
+        )}
+
+        {/* PNG 說明 */}
+        {format === 'png' && (
+          <p className="text-xs text-gray-400 mb-3">PNG 為無損格式，不支援品質調整</p>
+        )}
+
+        {/* 目標 KB 壓縮 */}
+        {format !== 'png' && (
+          <div className="pt-3 border-t border-gray-100">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs text-gray-500">限制檔案大小</span>
+              <button
+                onClick={() => onUpdateSettings({ enableTargetKB: !settings.enableTargetKB })}
+                className={`relative w-8 h-4 rounded-full transition-colors flex-shrink-0 ${
+                  settings.enableTargetKB ? 'bg-blue-500' : 'bg-gray-300'
+                }`}
+              >
+                <span
+                  className={`absolute top-0.5 left-0.5 w-3 h-3 bg-white rounded-full shadow transition-transform ${
+                    settings.enableTargetKB ? 'translate-x-4' : 'translate-x-0'
+                  }`}
+                />
+              </button>
+            </div>
+
+            {settings.enableTargetKB && (
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-gray-500">目標</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={10000}
+                  value={settings.targetKB ?? ''}
+                  onChange={(e) => {
+                    const val = parseInt(e.target.value)
+                    onUpdateSettings({ targetKB: isNaN(val) ? null : Math.max(1, val) })
+                  }}
+                  placeholder="KB"
+                  className="w-20 px-2 py-1 border border-gray-300 rounded text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
+                />
+                <span className="text-xs text-gray-400">KB</span>
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* 狀態資訊 */}
@@ -994,6 +1141,11 @@ function OutputSettingsPanel({
         {isModified && (
           <div className="text-blue-600">
             輸出尺寸: {settings.targetWidth} × {settings.targetHeight} px
+          </div>
+        )}
+        {settings.lastExportSize !== null && (
+          <div className="text-green-600">
+            檔案大小: {(settings.lastExportSize / 1024).toFixed(1)} KB
           </div>
         )}
       </div>
