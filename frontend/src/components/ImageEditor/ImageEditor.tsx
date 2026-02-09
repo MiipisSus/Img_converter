@@ -17,8 +17,6 @@ interface ImageEditorProps {
     flipX: () => void
     flipY: () => void
   } | null>
-  /** 鎖定的裁切框比例 (width/height)，若設定則裁切框調整時維持此比例 */
-  lockedAspectRatio?: number
 }
 
 type ResizeHandle = 'nw' | 'ne' | 'sw' | 'se' | 'n' | 's' | 'e' | 'w'
@@ -29,7 +27,6 @@ export function ImageEditor({
   initialState,
   showControls = true,
   onRotateFlipRef,
-  lockedAspectRatio,
 }: ImageEditorProps) {
   const imageRef = useRef<HTMLImageElement>(null)
   const [imageLoaded, setImageLoaded] = useState(false)
@@ -40,7 +37,7 @@ export function ImageEditor({
   const dragStartRef = useRef({ x: 0, y: 0, cropX: 0, cropY: 0, cropW: 0, cropH: 0 })
 
   // V5: useImageEditor 不再需要 viewport 尺寸參數
-  const editor = useImageEditor({ initialState, lockedAspectRatio })
+  const editor = useImageEditor({ initialState })
 
   const {
     state,

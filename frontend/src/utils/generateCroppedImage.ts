@@ -26,17 +26,18 @@ export interface CropResult {
  * - 導出時必須除以 M 還原為原始像素尺寸
  * - 支援 baseRotate (0, 90, 180, 270) 和 flipX/flipY
  *
- * 變換順序 (The Golden Rule) - CSS 和 Canvas 必須一致:
+ * 統一變換順序 (Canonical Order) - CSS 和 Canvas 必須一致:
  * 1. Translate (平移至中心)
- * 2. Base Rotate (90度單位旋轉)
- * 3. Free Rotate (自由旋轉)
- * 4. Flip (水平/垂直翻轉)
- * 5. User Scale (使用者縮放)
+ * 2. Scale + Flip (縮放，含翻轉)
+ * 3. Rotate (總角度 = baseRotate + freeRotate)
  *
- * Canvas 導出公式 (V7):
+ * 這確保翻轉是基於圖片自身的軸，而旋轉是最後施加的視覺效果。
+ * 使用者點擊『水平翻轉』時，圖片以『自身中軸』做鏡像。
+ *
+ * Canvas 導出公式:
  * 1. canvas.width = cropBox.w / M, canvas.height = cropBox.h / M
  * 2. 計算 UI 向量差並除以 M 轉換為原始像素
- * 3. 按順序執行變換: translate → baseRotate → rotate → flip → scale
+ * 3. 按順序執行變換: translate → scale(flip) → rotate(totalAngle)
  * 4. drawImage 使用原始像素尺寸
  */
 export async function generateCroppedImage(
@@ -91,21 +92,18 @@ export async function generateCroppedImage(
   const distX_orig = distX / M
   const distY_orig = distY / M
 
-  // 4. 座標變換步驟 (V7 順序)
+  // 4. 座標變換步驟 (統一變換順序)
   // 4.1 平移到「圖片中心相對於 Canvas 中心」的位置 (原始像素座標)
   ctx.translate(canvas.width / 2 - distX_orig, canvas.height / 2 - distY_orig)
 
-  // 4.2 步進旋轉 (baseRotate)
-  ctx.rotate((baseRotate * Math.PI) / 180)
+  // 4.2 縮放 + 翻轉 (翻轉在旋轉之前，確保翻轉是基於圖片自身的軸)
+  const flipScaleX = (flipX ? -1 : 1) * scale
+  const flipScaleY = (flipY ? -1 : 1) * scale
+  ctx.scale(flipScaleX, flipScaleY)
 
-  // 4.3 自由旋轉 (rotate)
-  ctx.rotate((rotate * Math.PI) / 180)
-
-  // 4.4 翻轉 (在旋轉之後，確保翻轉方向符合使用者預期)
-  ctx.scale(flipX ? -1 : 1, flipY ? -1 : 1)
-
-  // 4.5 使用者縮放
-  ctx.scale(scale, scale)
+  // 4.3 旋轉 (總角度 = baseRotate + freeRotate)
+  const totalRotate = baseRotate + rotate
+  ctx.rotate((totalRotate * Math.PI) / 180)
 
   // 5. 繪製圖片 (使用原始像素尺寸)
   ctx.drawImage(image, -naturalWidth / 2, -naturalHeight / 2, naturalWidth, naturalHeight)

@@ -570,7 +570,13 @@ function App() {
     }, true) // is90Rotation = true
   }, [applyTransformAndGenerate])
 
-  // 翻轉
+  /**
+   * 翻轉 (基於圖片自身軸)
+   * 由於變換順序為 flip → rotate，翻轉永遠是基於圖片自身的軸：
+   * - 水平翻轉 (flipX): 圖片以自身垂直中軸做左右鏡像
+   * - 垂直翻轉 (flipY): 圖片以自身水平中軸做上下鏡像
+   * 不論目前旋轉幾度，翻轉效果都一致。
+   */
   const handleFlip = useCallback((axis: 'x' | 'y') => {
     applyTransformAndGenerate((prevState, oldInfo) => {
       const newState: EditorState = {
