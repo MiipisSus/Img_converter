@@ -1,14 +1,17 @@
 import { useState, useCallback, useMemo, useRef } from 'react'
 
 /**
- * 編輯器狀態 (符合 V5 規格)
+ * 編輯器狀態 (符合 V7 規格)
  */
 export interface EditorState {
   // 圖片變換 (相對於容器中心)
   imageX: number      // 圖片中心相對於容器中心的 X 偏移
   imageY: number      // 圖片中心相對於容器中心的 Y 偏移
   scale: number       // 使用者縮放倍率 (1.0+)
-  rotate: number      // 旋轉角度 (-180 ~ 180)
+  rotate: number      // 自由旋轉角度 (-180 ~ 180)
+  baseRotate: number  // 步進旋轉 (0, 90, 180, 270)
+  flipX: boolean      // 水平翻轉
+  flipY: boolean      // 垂直翻轉
 
   // 裁切框 (相對於容器左上角，UI 座標)
   cropX: number
@@ -17,13 +20,13 @@ export interface EditorState {
   cropH: number
 }
 
-/** 圖片資訊 (V5 規格) */
+/** 圖片資訊 (V7 規格) */
 export interface ImageInfo {
   naturalWidth: number       // 原始像素寬度
   naturalHeight: number      // 原始像素高度
-  displayMultiplier: number  // 顯示倍率 M (小圖放大用)
-  containerWidth: number     // 容器寬度 = naturalWidth * M
-  containerHeight: number    // 容器高度 = naturalHeight * M
+  displayMultiplier: number  // 顯示倍率 M
+  containerWidth: number     // 容器寬度 = effW * M
+  containerHeight: number    // 容器高度 = effH * M
 }
 
 /** 容器寬度限制 (px) */
@@ -41,10 +44,40 @@ const DEFAULT_STATE: EditorState = {
   imageY: 0,
   scale: 1,
   rotate: 0,
+  baseRotate: 0,
+  flipX: false,
+  flipY: false,
   cropX: 0,
   cropY: 0,
   cropW: 100,
   cropH: 100,
+}
+
+/**
+ * 根據 baseRotate 計算有效尺寸 (V7 規格)
+ * 當 baseRotate 為 90 或 270 時，寬高互換
+ */
+function getEffectiveDimensions(
+  naturalWidth: number,
+  naturalHeight: number,
+  baseRotate: number
+): { effW: number; effH: number } {
+  if (baseRotate === 90 || baseRotate === 270) {
+    return { effW: naturalHeight, effH: naturalWidth }
+  }
+  return { effW: naturalWidth, effH: naturalHeight }
+}
+
+/**
+ * 根據有效寬度計算 displayMultiplier (V7 規格)
+ */
+function calculateDisplayMultiplier(effW: number): number {
+  if (effW > MAX_CONTAINER_WIDTH) {
+    return MAX_CONTAINER_WIDTH / effW
+  } else if (effW < MIN_CONTAINER_WIDTH) {
+    return MIN_CONTAINER_WIDTH / effW
+  }
+  return 1
 }
 
 export function useImageEditor(options: UseImageEditorOptions | null) {
@@ -52,31 +85,33 @@ export function useImageEditor(options: UseImageEditorOptions | null) {
   const [imageInfo, setImageInfo] = useState<ImageInfo | null>(null)
   const initializedRef = useRef(false)
 
+  // 保存原始圖片尺寸供 90° 旋轉重算使用
+  const naturalDimensionsRef = useRef<{ width: number; height: number } | null>(null)
+
   const optionsRef = useRef(options)
   optionsRef.current = options
 
   const minCropSize = options?.minCropSize ?? 50
   const initialStateOption = options?.initialState
 
-  // 初始化 (V6 規格)
+  // 初始化 (V7 規格)
   const initialize = useCallback(
     (naturalWidth: number, naturalHeight: number) => {
-      // 計算顯示倍率 M (V6: 同時處理放大和縮小)
-      let displayMultiplier: number
-      if (naturalWidth > MAX_CONTAINER_WIDTH) {
-        // 大圖縮小顯示
-        displayMultiplier = MAX_CONTAINER_WIDTH / naturalWidth
-      } else if (naturalWidth < MIN_CONTAINER_WIDTH) {
-        // 小圖放大顯示
-        displayMultiplier = MIN_CONTAINER_WIDTH / naturalWidth
-      } else {
-        // 原始大小顯示
-        displayMultiplier = 1
-      }
+      // 保存原始尺寸
+      naturalDimensionsRef.current = { width: naturalWidth, height: naturalHeight }
 
-      // 容器尺寸 = 原始尺寸 * M (保持原始比例)
-      const containerWidth = Math.round(naturalWidth * displayMultiplier)
-      const containerHeight = Math.round(naturalHeight * displayMultiplier)
+      // 初始 baseRotate (從 initialState 或預設 0)
+      const baseRotate = initialStateOption?.baseRotate ?? 0
+
+      // 計算有效尺寸
+      const { effW, effH } = getEffectiveDimensions(naturalWidth, naturalHeight, baseRotate)
+
+      // 計算顯示倍率 M
+      const displayMultiplier = calculateDisplayMultiplier(effW)
+
+      // 容器尺寸 = 有效尺寸 * M
+      const containerWidth = Math.round(effW * displayMultiplier)
+      const containerHeight = Math.round(effH * displayMultiplier)
 
       setImageInfo({
         naturalWidth,
@@ -95,6 +130,9 @@ export function useImageEditor(options: UseImageEditorOptions | null) {
           imageY: 0,
           scale: 1,
           rotate: 0,
+          baseRotate: 0,
+          flipX: false,
+          flipY: false,
           cropX: 0,
           cropY: 0,
           cropW: containerWidth,
@@ -117,7 +155,6 @@ export function useImageEditor(options: UseImageEditorOptions | null) {
 
   // 設定旋轉 (-180 ~ 180)
   const setRotate = useCallback((rotate: number) => {
-    // 限制在 -180 ~ 180 範圍
     const clamped = Math.max(-180, Math.min(180, rotate))
     setState((prev) => ({ ...prev, rotate: clamped }))
   }, [])
@@ -130,6 +167,62 @@ export function useImageEditor(options: UseImageEditorOptions | null) {
   // 用於邊界檢查的 imageInfo ref
   const imageInfoRef = useRef<ImageInfo | null>(null)
   imageInfoRef.current = imageInfo
+
+  /**
+   * 90° 旋轉 (重新計算容器尺寸)
+   */
+  const rotateBy90 = useCallback((direction: 'left' | 'right') => {
+    const dims = naturalDimensionsRef.current
+    if (!dims) return
+
+    setState((prev) => {
+      // 計算新的 baseRotate
+      let newBaseRotate: number
+      if (direction === 'right') {
+        newBaseRotate = (prev.baseRotate + 90) % 360
+      } else {
+        newBaseRotate = (prev.baseRotate - 90 + 360) % 360
+      }
+
+      // 計算新的有效尺寸和容器尺寸
+      const { effW, effH } = getEffectiveDimensions(dims.width, dims.height, newBaseRotate)
+      const newM = calculateDisplayMultiplier(effW)
+      const newContainerW = Math.round(effW * newM)
+      const newContainerH = Math.round(effH * newM)
+
+      // 更新 imageInfo
+      setImageInfo({
+        naturalWidth: dims.width,
+        naturalHeight: dims.height,
+        displayMultiplier: newM,
+        containerWidth: newContainerW,
+        containerHeight: newContainerH,
+      })
+
+      // 重置裁切框為新容器大小，重置位置
+      return {
+        ...prev,
+        baseRotate: newBaseRotate,
+        imageX: 0,
+        imageY: 0,
+        cropX: 0,
+        cropY: 0,
+        cropW: newContainerW,
+        cropH: newContainerH,
+      }
+    })
+  }, [])
+
+  /**
+   * 翻轉
+   */
+  const toggleFlipX = useCallback(() => {
+    setState((prev) => ({ ...prev, flipX: !prev.flipX }))
+  }, [])
+
+  const toggleFlipY = useCallback(() => {
+    setState((prev) => ({ ...prev, flipY: !prev.flipY }))
+  }, [])
 
   // 移動裁切框
   const moveCropBox = useCallback(
@@ -247,14 +340,17 @@ export function useImageEditor(options: UseImageEditorOptions | null) {
   )
 
   /**
-   * CSS Transform (符合 V5 規格順序: translate → rotate → scale)
+   * CSS Transform (符合 V7 規格順序)
+   * 順序: translate → baseRotate → freeRotate → flip → scale
    * transform-origin 必須是 center center
    */
   const imageTransform = useMemo(() => {
-    const { imageX, imageY, rotate, scale } = state
-    // 順序: 先平移 → 再旋轉 → 再縮放
-    return `translate(${imageX}px, ${imageY}px) rotate(${rotate}deg) scale(${scale})`
-  }, [state.imageX, state.imageY, state.rotate, state.scale])
+    const { imageX, imageY, rotate, baseRotate, flipX, flipY, scale } = state
+    const flipScaleX = flipX ? -1 : 1
+    const flipScaleY = flipY ? -1 : 1
+    // 順序: 平移 → 步進旋轉 → 自由旋轉 → 翻轉 → 縮放
+    return `translate(${imageX}px, ${imageY}px) rotate(${baseRotate}deg) rotate(${rotate}deg) scale(${flipScaleX * scale}, ${flipScaleY * scale})`
+  }, [state.imageX, state.imageY, state.rotate, state.baseRotate, state.flipX, state.flipY, state.scale])
 
   return {
     state,
@@ -265,6 +361,9 @@ export function useImageEditor(options: UseImageEditorOptions | null) {
     setScale,
     setRotate,
     setImagePosition,
+    rotateBy90,
+    toggleFlipX,
+    toggleFlipY,
     moveCropBox,
     resizeCropBox,
     setCropBox,

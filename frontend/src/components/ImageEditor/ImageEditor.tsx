@@ -10,6 +10,13 @@ interface ImageEditorProps {
   initialState?: EditorState
   /** 是否顯示控制面板 */
   showControls?: boolean
+  /** 旋轉/翻轉控制回調 (由外部提供按鈕) */
+  onRotateFlipRef?: React.MutableRefObject<{
+    rotateLeft: () => void
+    rotateRight: () => void
+    flipX: () => void
+    flipY: () => void
+  } | null>
 }
 
 type ResizeHandle = 'nw' | 'ne' | 'sw' | 'se' | 'n' | 's' | 'e' | 'w'
@@ -19,6 +26,7 @@ export function ImageEditor({
   onStateChange,
   initialState,
   showControls = true,
+  onRotateFlipRef,
 }: ImageEditorProps) {
   const imageRef = useRef<HTMLImageElement>(null)
   const [imageLoaded, setImageLoaded] = useState(false)
@@ -38,10 +46,30 @@ export function ImageEditor({
     initialize,
     setScale,
     setRotate,
+    rotateBy90,
+    toggleFlipX,
+    toggleFlipY,
     moveCropBox,
     resizeCropBox,
     setCropBox,
   } = editor
+
+  // 暴露旋轉/翻轉函數給外部
+  useEffect(() => {
+    if (onRotateFlipRef) {
+      onRotateFlipRef.current = {
+        rotateLeft: () => rotateBy90('left'),
+        rotateRight: () => rotateBy90('right'),
+        flipX: toggleFlipX,
+        flipY: toggleFlipY,
+      }
+    }
+    return () => {
+      if (onRotateFlipRef) {
+        onRotateFlipRef.current = null
+      }
+    }
+  }, [onRotateFlipRef, rotateBy90, toggleFlipX, toggleFlipY])
 
   // 圖片載入 - 初始化編輯器
   const handleImageLoad = useCallback(() => {
@@ -289,7 +317,9 @@ export function ImageEditor({
         <div className="text-xs text-gray-500 font-mono space-y-1">
           <div>原圖: {imageInfo.naturalWidth} × {imageInfo.naturalHeight}</div>
           <div>容器: {imageInfo.containerWidth} × {imageInfo.containerHeight} (M: {imageInfo.displayMultiplier.toFixed(2)})</div>
-          <div>image: ({state.imageX}, {state.imageY}), scale: {scale.toFixed(2)}, rotate: {rotate}°</div>
+          <div>image: ({state.imageX}, {state.imageY}), scale: {scale.toFixed(2)}</div>
+          <div>baseRotate: {state.baseRotate}°, rotate: {rotate}°</div>
+          <div>flipX: {state.flipX ? 'Y' : 'N'}, flipY: {state.flipY ? 'Y' : 'N'}</div>
           <div>cropBox: ({cropX.toFixed(0)}, {cropY.toFixed(0)}) {cropW.toFixed(0)} × {cropH.toFixed(0)}</div>
           <div>導出尺寸: {(cropW / imageInfo.displayMultiplier).toFixed(0)} × {(cropH / imageInfo.displayMultiplier).toFixed(0)} px</div>
         </div>

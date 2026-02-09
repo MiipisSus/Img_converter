@@ -15,28 +15,25 @@ export interface CropResult {
 }
 
 /**
- * 根據編輯器狀態生成裁切後的圖片 (V5 規格)
+ * 根據編輯器狀態生成裁切後的圖片 (V7 規格)
  *
- * V5 核心概念:
- * - UI 座標系使用 displayMultiplier (M) 放大顯示
+ * V7 核心概念:
+ * - UI 座標系使用 displayMultiplier (M) 放大/縮小顯示
  * - 導出時必須除以 M 還原為原始像素尺寸
+ * - 支援 baseRotate (0, 90, 180, 270) 和 flipX/flipY
  *
- * 座標同步邏輯 (The Golden Rule):
- * - CSS 預覽與 Canvas 必須共用同一個變換順序
- * - 順序: translate → rotate → scale
+ * 變換順序 (The Golden Rule) - CSS 和 Canvas 必須一致:
+ * 1. Translate (平移至中心)
+ * 2. Base Rotate (90度單位旋轉)
+ * 3. Free Rotate (自由旋轉)
+ * 4. Flip (水平/垂直翻轉)
+ * 5. User Scale (使用者縮放)
  *
- * Canvas 導出公式 (V5):
- * 1. canvas.width = cropBox.w / M, canvas.height = cropBox.h / M (還原像素)
- * 2. 計算 UI 向量差:
- *    - distX = (cropBox.x + cropBox.w/2) - (container.w/2 + image.x)
- *    - distY = (cropBox.y + cropBox.h/2) - (container.h/2 + image.y)
- * 3. 轉換為原始像素向量:
- *    - distX_orig = distX / M
- *    - distY_orig = distY / M
- * 4. ctx.translate(canvas.width/2 - distX_orig, canvas.height/2 - distY_orig)
- * 5. ctx.rotate(rotate * PI/180)
- * 6. ctx.scale(scale, scale)
- * 7. ctx.drawImage(img, -naturalWidth/2, -naturalHeight/2, naturalWidth, naturalHeight)
+ * Canvas 導出公式 (V7):
+ * 1. canvas.width = cropBox.w / M, canvas.height = cropBox.h / M
+ * 2. 計算 UI 向量差並除以 M 轉換為原始像素
+ * 3. 按順序執行變換: translate → baseRotate → rotate → flip → scale
+ * 4. drawImage 使用原始像素尺寸
  */
 export async function generateCroppedImage(
   image: HTMLImageElement,
@@ -45,7 +42,19 @@ export async function generateCroppedImage(
   options: CropOptions = {}
 ): Promise<CropResult> {
   const { format = 'image/png', quality = 0.92 } = options
-  const { imageX, imageY, scale, rotate, cropX, cropY, cropW, cropH } = state
+  const {
+    imageX,
+    imageY,
+    scale,
+    rotate,
+    baseRotate,
+    flipX,
+    flipY,
+    cropX,
+    cropY,
+    cropW,
+    cropH,
+  } = state
   const { naturalWidth, naturalHeight, displayMultiplier, containerWidth, containerHeight } = imageInfo
 
   // M = displayMultiplier
@@ -78,17 +87,20 @@ export async function generateCroppedImage(
   const distX_orig = distX / M
   const distY_orig = distY / M
 
-  // 4. 座標變換步驟
-  // 必須先套用 translate (包含偏移)，再 rotate/scale
-  // 這樣偏移向量會和旋轉/縮放一起被正確變換
-
+  // 4. 座標變換步驟 (V7 順序)
   // 4.1 平移到「圖片中心相對於 Canvas 中心」的位置 (原始像素座標)
   ctx.translate(canvas.width / 2 - distX_orig, canvas.height / 2 - distY_orig)
 
-  // 4.2 旋轉
+  // 4.2 步進旋轉 (baseRotate)
+  ctx.rotate((baseRotate * Math.PI) / 180)
+
+  // 4.3 自由旋轉 (rotate)
   ctx.rotate((rotate * Math.PI) / 180)
 
-  // 4.3 縮放
+  // 4.4 翻轉 (在旋轉之後，確保翻轉方向符合使用者預期)
+  ctx.scale(flipX ? -1 : 1, flipY ? -1 : 1)
+
+  // 4.5 使用者縮放
   ctx.scale(scale, scale)
 
   // 5. 繪製圖片 (使用原始像素尺寸)
