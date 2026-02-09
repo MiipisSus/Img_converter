@@ -29,14 +29,16 @@ export interface ImageInfo {
   containerHeight: number    // 容器高度 = effH * M
 }
 
-/** 容器寬度限制 (px) */
+/** 容器寬度限制 (px) - 符合 IMAGE_CROPPER_SPEC V7 */
 const MIN_CONTAINER_WIDTH = 400
-const MAX_CONTAINER_WIDTH = 800
+const MAX_CONTAINER_WIDTH = 600
 
 interface UseImageEditorOptions {
   minCropSize?: number
   /** 初始狀態 (用於恢復上次的裁切參數) */
   initialState?: EditorState
+  /** 鎖定的裁切框比例 (width/height)，若設定則裁切框調整時維持此比例 */
+  lockedAspectRatio?: number
 }
 
 const DEFAULT_STATE: EditorState = {
@@ -93,6 +95,7 @@ export function useImageEditor(options: UseImageEditorOptions | null) {
 
   const minCropSize = options?.minCropSize ?? 50
   const initialStateOption = options?.initialState
+  const lockedAspectRatio = options?.lockedAspectRatio
 
   // 初始化 (V7 規格)
   const initialize = useCallback(
@@ -245,6 +248,10 @@ export function useImageEditor(options: UseImageEditorOptions | null) {
     []
   )
 
+  // 用於比例鎖定的 ref
+  const lockedAspectRatioRef = useRef<number | undefined>(undefined)
+  lockedAspectRatioRef.current = lockedAspectRatio
+
   // 調整裁切框大小
   const resizeCropBox = useCallback(
     (
@@ -256,73 +263,160 @@ export function useImageEditor(options: UseImageEditorOptions | null) {
       if (!info) return
 
       const { containerWidth, containerHeight } = info
+      const aspectRatio = lockedAspectRatioRef.current
 
       setState((prev) => {
         let { cropX, cropY, cropW, cropH } = prev
         const originalRight = cropX + cropW
         const originalBottom = cropY + cropH
 
-        switch (handle) {
-          case 'nw':
-            cropX += deltaX
-            cropY += deltaY
-            cropW -= deltaX
-            cropH -= deltaY
-            break
-          case 'ne':
-            cropY += deltaY
-            cropW += deltaX
-            cropH -= deltaY
-            break
-          case 'sw':
-            cropX += deltaX
-            cropW -= deltaX
-            cropH += deltaY
-            break
-          case 'se':
-            cropW += deltaX
-            cropH += deltaY
-            break
-          case 'n':
-            cropY += deltaY
-            cropH -= deltaY
-            break
-          case 's':
-            cropH += deltaY
-            break
-          case 'w':
-            cropX += deltaX
-            cropW -= deltaX
-            break
-          case 'e':
-            cropW += deltaX
-            break
-        }
+        // 如果有鎖定比例且是角落拖動，使用比例鎖定邏輯
+        const isCorner = ['nw', 'ne', 'sw', 'se'].includes(handle)
 
-        // 邊界檢查
-        if (handle.includes('n') && cropY < 0) {
-          cropY = 0
-          cropH = originalBottom
-        }
-        if (handle.includes('w') && cropX < 0) {
-          cropX = 0
-          cropW = originalRight
-        }
-        if (handle.includes('s') && cropY + cropH > containerHeight) {
-          cropH = containerHeight - cropY
-        }
-        if (handle.includes('e') && cropX + cropW > containerWidth) {
-          cropW = containerWidth - cropX
-        }
+        if (aspectRatio && isCorner) {
+          // 比例鎖定模式：根據拖動距離較大的方向決定新尺寸
+          const absDeltaX = Math.abs(deltaX)
+          const absDeltaY = Math.abs(deltaY)
 
-        // 最小尺寸
-        if (cropW < minCropSize) {
-          if (handle.includes('w')) cropX = originalRight - minCropSize
-          cropW = minCropSize
-        }
-        if (cropH < minCropSize) {
-          if (handle.includes('n')) cropY = originalBottom - minCropSize
-          cropH = minCropSize
+          let newW: number, newH: number
+
+          // 決定以哪個方向為主
+          if (absDeltaX > absDeltaY) {
+            // 以 X 方向為主
+            if (handle === 'nw' || handle === 'sw') {
+              newW = cropW - deltaX
+            } else {
+              newW = cropW + deltaX
+            }
+            newH = newW / aspectRatio
+          } else {
+            // 以 Y 方向為主
+            if (handle === 'nw' || handle === 'ne') {
+              newH = cropH - deltaY
+            } else {
+              newH = cropH + deltaY
+            }
+            newW = newH * aspectRatio
+          }
+
+          // 確保最小尺寸
+          if (newW < minCropSize) {
+            newW = minCropSize
+            newH = newW / aspectRatio
+          }
+          if (newH < minCropSize) {
+            newH = minCropSize
+            newW = newH * aspectRatio
+          }
+
+          // 根據 handle 決定位置調整
+          switch (handle) {
+            case 'nw':
+              cropX = originalRight - newW
+              cropY = originalBottom - newH
+              break
+            case 'ne':
+              cropY = originalBottom - newH
+              break
+            case 'sw':
+              cropX = originalRight - newW
+              break
+            case 'se':
+              // 位置不變，只改變尺寸
+              break
+          }
+          cropW = newW
+          cropH = newH
+
+          // 邊界檢查 (比例鎖定模式)
+          if (cropX < 0) {
+            cropX = 0
+            cropW = Math.min(containerWidth, originalRight)
+            cropH = cropW / aspectRatio
+            if (handle === 'nw' || handle === 'sw') {
+              if (handle === 'nw') cropY = originalBottom - cropH
+            }
+          }
+          if (cropY < 0) {
+            cropY = 0
+            cropH = Math.min(containerHeight, originalBottom)
+            cropW = cropH * aspectRatio
+            if (handle === 'nw' || handle === 'ne') {
+              if (handle === 'nw') cropX = originalRight - cropW
+            }
+          }
+          if (cropX + cropW > containerWidth) {
+            cropW = containerWidth - cropX
+            cropH = cropW / aspectRatio
+          }
+          if (cropY + cropH > containerHeight) {
+            cropH = containerHeight - cropY
+            cropW = cropH * aspectRatio
+          }
+        } else {
+          // 原始邏輯 (無比例鎖定或邊緣拖動)
+          switch (handle) {
+            case 'nw':
+              cropX += deltaX
+              cropY += deltaY
+              cropW -= deltaX
+              cropH -= deltaY
+              break
+            case 'ne':
+              cropY += deltaY
+              cropW += deltaX
+              cropH -= deltaY
+              break
+            case 'sw':
+              cropX += deltaX
+              cropW -= deltaX
+              cropH += deltaY
+              break
+            case 'se':
+              cropW += deltaX
+              cropH += deltaY
+              break
+            case 'n':
+              cropY += deltaY
+              cropH -= deltaY
+              break
+            case 's':
+              cropH += deltaY
+              break
+            case 'w':
+              cropX += deltaX
+              cropW -= deltaX
+              break
+            case 'e':
+              cropW += deltaX
+              break
+          }
+
+          // 邊界檢查
+          if (handle.includes('n') && cropY < 0) {
+            cropY = 0
+            cropH = originalBottom
+          }
+          if (handle.includes('w') && cropX < 0) {
+            cropX = 0
+            cropW = originalRight
+          }
+          if (handle.includes('s') && cropY + cropH > containerHeight) {
+            cropH = containerHeight - cropY
+          }
+          if (handle.includes('e') && cropX + cropW > containerWidth) {
+            cropW = containerWidth - cropX
+          }
+
+          // 最小尺寸
+          if (cropW < minCropSize) {
+            if (handle.includes('w')) cropX = originalRight - minCropSize
+            cropW = minCropSize
+          }
+          if (cropH < minCropSize) {
+            if (handle.includes('n')) cropY = originalBottom - minCropSize
+            cropH = minCropSize
+          }
         }
 
         return { ...prev, cropX, cropY, cropW, cropH }

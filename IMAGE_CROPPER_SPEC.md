@@ -12,13 +12,13 @@
 
     動態顯示倍率 (displayMultiplier, M)：
 
-        MIN_WIDTH = 400, MAX_WIDTH = 800。
+        MIN_WIDTH = 400, MAX_WIDTH = 600。
 
         計算邏輯：
 
             若 effW > MAX_WIDTH：M=MAX_WIDTH/effW。
 
-            若 effW < MIN_WIDTH：M=400/effW。
+            若 effW < MIN_WIDTH：M=MIN_WIDTH/effW。
 
             其他：M=1。
 

@@ -5,6 +5,10 @@ export interface CropOptions {
   format?: 'image/png' | 'image/jpeg' | 'image/webp'
   /** JPEG/WebP 品質 (0-1) */
   quality?: number
+  /** 目標寬度 (可選，用於縮放) */
+  targetWidth?: number
+  /** 目標高度 (可選，用於縮放) */
+  targetHeight?: number
 }
 
 export interface CropResult {
@@ -41,7 +45,7 @@ export async function generateCroppedImage(
   imageInfo: ImageInfo,
   options: CropOptions = {}
 ): Promise<CropResult> {
-  const { format = 'image/png', quality = 0.92 } = options
+  const { format = 'image/png', quality = 0.92, targetWidth, targetHeight } = options
   const {
     imageX,
     imageY,
@@ -106,9 +110,41 @@ export async function generateCroppedImage(
   // 5. 繪製圖片 (使用原始像素尺寸)
   ctx.drawImage(image, -naturalWidth / 2, -naturalHeight / 2, naturalWidth, naturalHeight)
 
+  // 6. 調整尺寸 (如果有指定目標尺寸)
+  let finalCanvas: HTMLCanvasElement = canvas
+  const croppedWidth = canvas.width
+  const croppedHeight = canvas.height
+
+  // 檢查是否需要縮放
+  const needsResize =
+    targetWidth !== undefined &&
+    targetHeight !== undefined &&
+    (targetWidth !== croppedWidth || targetHeight !== croppedHeight)
+
+  if (needsResize) {
+    // 建立縮放用的新 Canvas
+    const resizeCanvas = document.createElement('canvas')
+    resizeCanvas.width = targetWidth!
+    resizeCanvas.height = targetHeight!
+
+    const resizeCtx = resizeCanvas.getContext('2d')
+    if (!resizeCtx) {
+      throw new Error('無法建立 Resize Canvas Context')
+    }
+
+    // 使用高品質縮放
+    resizeCtx.imageSmoothingEnabled = true
+    resizeCtx.imageSmoothingQuality = 'high'
+
+    // 將裁切後的圖片繪製到縮放 Canvas
+    resizeCtx.drawImage(canvas, 0, 0, croppedWidth, croppedHeight, 0, 0, targetWidth!, targetHeight!)
+
+    finalCanvas = resizeCanvas
+  }
+
   // 轉換為 Blob
   const blob = await new Promise<Blob>((resolve, reject) => {
-    canvas.toBlob(
+    finalCanvas.toBlob(
       (b) => {
         if (b) resolve(b)
         else reject(new Error('Canvas toBlob 失敗'))
@@ -118,12 +154,12 @@ export async function generateCroppedImage(
     )
   })
 
-  const dataUrl = canvas.toDataURL(format, quality)
+  const dataUrl = finalCanvas.toDataURL(format, quality)
 
   return {
     blob,
     dataUrl,
-    width: canvas.width,
-    height: canvas.height,
+    width: finalCanvas.width,
+    height: finalCanvas.height,
   }
 }
