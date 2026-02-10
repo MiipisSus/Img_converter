@@ -1,30 +1,34 @@
-import { useRef, useEffect, useCallback, useState } from 'react'
-import { useImageEditor, type EditorState, type ImageInfo } from '../../hooks/useImageEditor'
+import { useRef, useEffect, useCallback, useState } from "react";
+import {
+  useImageEditor,
+  type EditorState,
+  type ImageInfo,
+} from "../../hooks/useImageEditor";
 
 interface ImageEditorProps {
   /** 圖片來源 */
-  src: string
+  src: string;
   /** 狀態變更回調 */
-  onStateChange?: (state: EditorState, imageInfo: ImageInfo | null) => void
+  onStateChange?: (state: EditorState, imageInfo: ImageInfo | null) => void;
   /** 初始狀態 (用於恢復上次的裁切參數) */
-  initialState?: EditorState
+  initialState?: EditorState;
   /** 是否顯示控制面板 */
-  showControls?: boolean
+  showControls?: boolean;
   /** 旋轉/翻轉控制回調 (由外部提供按鈕) */
   onRotateFlipRef?: React.MutableRefObject<{
-    rotateLeft: () => void
-    rotateRight: () => void
-    flipX: () => void
-    flipY: () => void
-  } | null>
+    rotateLeft: () => void;
+    rotateRight: () => void;
+    flipX: () => void;
+    flipY: () => void;
+  } | null>;
   /** 縮放/旋轉控制回調 (由外部 sidebar 控制) */
   onEditorControlRef?: React.MutableRefObject<{
-    setScale: (s: number) => void
-    setRotate: (r: number) => void
-  } | null>
+    setScale: (s: number) => void;
+    setRotate: (r: number) => void;
+  } | null>;
 }
 
-type ResizeHandle = 'nw' | 'ne' | 'sw' | 'se' | 'n' | 's' | 'e' | 'w'
+type ResizeHandle = "nw" | "ne" | "sw" | "se" | "n" | "s" | "e" | "w";
 
 export function ImageEditor({
   src,
@@ -34,16 +38,25 @@ export function ImageEditor({
   onRotateFlipRef,
   onEditorControlRef,
 }: ImageEditorProps) {
-  const imageRef = useRef<HTMLImageElement>(null)
-  const [imageLoaded, setImageLoaded] = useState(false)
+  const imageRef = useRef<HTMLImageElement>(null);
+  const [imageLoaded, setImageLoaded] = useState(false);
 
   // 拖動狀態
-  const [isResizing, setIsResizing] = useState<ResizeHandle | null>(null)
-  const [isDraggingImage, setIsDraggingImage] = useState(false)
-  const dragStartRef = useRef({ x: 0, y: 0, cropX: 0, cropY: 0, cropW: 0, cropH: 0, imageX: 0, imageY: 0 })
+  const [isResizing, setIsResizing] = useState<ResizeHandle | null>(null);
+  const [isDraggingImage, setIsDraggingImage] = useState(false);
+  const dragStartRef = useRef({
+    x: 0,
+    y: 0,
+    cropX: 0,
+    cropY: 0,
+    cropW: 0,
+    cropH: 0,
+    imageX: 0,
+    imageY: 0,
+  });
 
   // V5: useImageEditor 不再需要 viewport 尺寸參數
-  const editor = useImageEditor({ initialState })
+  const editor = useImageEditor({ initialState });
 
   const {
     state,
@@ -59,56 +72,56 @@ export function ImageEditor({
     toggleFlipY,
     resizeCropBox,
     setCropBox,
-  } = editor
+  } = editor;
 
   // 暴露旋轉/翻轉函數給外部
   useEffect(() => {
     if (onRotateFlipRef) {
       onRotateFlipRef.current = {
-        rotateLeft: () => rotateBy90('left'),
-        rotateRight: () => rotateBy90('right'),
+        rotateLeft: () => rotateBy90("left"),
+        rotateRight: () => rotateBy90("right"),
         flipX: toggleFlipX,
         flipY: toggleFlipY,
-      }
+      };
     }
     return () => {
       if (onRotateFlipRef) {
-        onRotateFlipRef.current = null
+        onRotateFlipRef.current = null;
       }
-    }
-  }, [onRotateFlipRef, rotateBy90, toggleFlipX, toggleFlipY])
+    };
+  }, [onRotateFlipRef, rotateBy90, toggleFlipX, toggleFlipY]);
 
   // 暴露縮放/旋轉控制給外部 sidebar
   useEffect(() => {
     if (onEditorControlRef) {
-      onEditorControlRef.current = { setScale, setRotate }
+      onEditorControlRef.current = { setScale, setRotate };
     }
     return () => {
       if (onEditorControlRef) {
-        onEditorControlRef.current = null
+        onEditorControlRef.current = null;
       }
-    }
-  }, [onEditorControlRef, setScale, setRotate])
+    };
+  }, [onEditorControlRef, setScale, setRotate]);
 
   // 圖片載入 - 初始化編輯器
   const handleImageLoad = useCallback(() => {
-    const img = imageRef.current
-    if (!img) return
+    const img = imageRef.current;
+    if (!img) return;
 
-    initialize(img.naturalWidth, img.naturalHeight)
-    setImageLoaded(true)
-  }, [initialize])
+    initialize(img.naturalWidth, img.naturalHeight);
+    setImageLoaded(true);
+  }, [initialize]);
 
   // 回報狀態變更
   useEffect(() => {
-    onStateChange?.(state, imageInfo)
-  }, [state, imageInfo, onStateChange])
+    onStateChange?.(state, imageInfo);
+  }, [state, imageInfo, onStateChange]);
 
   // --- 調整大小 ---
   const handleResizeMouseDown = useCallback(
     (handle: ResizeHandle) => (e: React.MouseEvent) => {
-      e.stopPropagation()
-      setIsResizing(handle)
+      e.stopPropagation();
+      setIsResizing(handle);
       dragStartRef.current = {
         x: e.clientX,
         y: e.clientY,
@@ -118,16 +131,16 @@ export function ImageEditor({
         cropH: state.cropH,
         imageX: 0,
         imageY: 0,
-      }
+      };
     },
-    [state.cropX, state.cropY, state.cropW, state.cropH]
-  )
+    [state.cropX, state.cropY, state.cropW, state.cropH],
+  );
 
   // --- 拖動圖片 (框定型：非控制點區域皆為圖片拖動) ---
   const handleContainerMouseDown = useCallback(
     (e: React.MouseEvent) => {
-      if (state.scale <= 1 && state.rotate === 0) return
-      setIsDraggingImage(true)
+      if (state.scale <= 1 && state.rotate === 0) return;
+      setIsDraggingImage(true);
       dragStartRef.current = {
         x: e.clientX,
         y: e.clientY,
@@ -137,16 +150,16 @@ export function ImageEditor({
         cropH: 0,
         imageX: state.imageX,
         imageY: state.imageY,
-      }
+      };
     },
-    [state.scale, state.rotate, state.imageX, state.imageY]
-  )
+    [state.scale, state.rotate, state.imageX, state.imageY],
+  );
 
   // --- 全域滑鼠事件 ---
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
-      const deltaX = e.clientX - dragStartRef.current.x
-      const deltaY = e.clientY - dragStartRef.current.y
+      const deltaX = e.clientX - dragStartRef.current.x;
+      const deltaY = e.clientY - dragStartRef.current.y;
 
       if (isResizing) {
         setCropBox({
@@ -154,169 +167,233 @@ export function ImageEditor({
           cropY: dragStartRef.current.cropY,
           cropW: dragStartRef.current.cropW,
           cropH: dragStartRef.current.cropH,
-        })
-        resizeCropBox(isResizing, deltaX, deltaY)
+        });
+        resizeCropBox(isResizing, deltaX, deltaY);
       } else if (isDraggingImage) {
         setImagePosition(
           dragStartRef.current.imageX + deltaX,
-          dragStartRef.current.imageY + deltaY
-        )
+          dragStartRef.current.imageY + deltaY,
+        );
       }
-    }
+    };
 
     const handleMouseUp = () => {
-      setIsResizing(null)
-      setIsDraggingImage(false)
+      setIsResizing(null);
+      setIsDraggingImage(false);
       // 邊界回彈：確保裁切框在圖片範圍內
-      clampImage()
-    }
+      clampImage();
+    };
 
     if (isResizing || isDraggingImage) {
-      window.addEventListener('mousemove', handleMouseMove)
-      window.addEventListener('mouseup', handleMouseUp)
+      window.addEventListener("mousemove", handleMouseMove);
+      window.addEventListener("mouseup", handleMouseUp);
       return () => {
-        window.removeEventListener('mousemove', handleMouseMove)
-        window.removeEventListener('mouseup', handleMouseUp)
-      }
+        window.removeEventListener("mousemove", handleMouseMove);
+        window.removeEventListener("mouseup", handleMouseUp);
+      };
     }
-  }, [isResizing, isDraggingImage, setCropBox, resizeCropBox, setImagePosition, clampImage])
+  }, [
+    isResizing,
+    isDraggingImage,
+    setCropBox,
+    resizeCropBox,
+    setImagePosition,
+    clampImage,
+  ]);
 
   // --- 滾輪縮放 ---
   const handleWheel = useCallback(
     (e: React.WheelEvent) => {
-      e.preventDefault()
+      e.preventDefault();
       // 向前滾 (deltaY < 0) = 放大，向後滾 (deltaY > 0) = 縮小
-      const delta = -e.deltaY * 0.001
-      setScale(state.scale + delta)
+      const delta = -e.deltaY * 0.001;
+      setScale(state.scale + delta);
     },
-    [state.scale, setScale]
-  )
+    [state.scale, setScale],
+  );
 
-  const { cropX, cropY, cropW, cropH, scale, rotate } = state
+  const { cropX, cropY, cropW, cropH, scale, rotate } = state;
 
   // V6: 容器尺寸由 imageInfo 決定
-  const containerWidth = imageInfo?.containerWidth ?? 400
-  const containerHeight = imageInfo?.containerHeight ?? 300
+  const containerWidth = imageInfo?.containerWidth ?? 400;
+  const containerHeight = imageInfo?.containerHeight ?? 300;
 
   return (
-    <div
-      className="flex flex-col gap-4"
-      style={{ width: containerWidth }}
-    >
+    <div className="flex flex-col gap-4" style={{ width: containerWidth }}>
       {/* 容器 - V6: 尺寸 = 原始尺寸 * displayMultiplier，保持原始比例 */}
       <div
-        className="relative overflow-hidden select-none flex-shrink-0 rounded-lg"
+        className="relative select-none flex-shrink-0"
         style={{
           width: containerWidth,
           height: containerHeight,
-          cursor: isDraggingImage ? 'grabbing' : (scale > 1 || Math.abs(rotate) > 0) ? 'grab' : 'default',
+          cursor: isDraggingImage
+            ? "grabbing"
+            : scale > 1 || Math.abs(rotate) > 0
+              ? "grab"
+              : "default",
         }}
         onWheel={handleWheel}
         onMouseDown={handleContainerMouseDown}
       >
-        {/* Layer 0: 棋盤格背景 (用於顯示透明區域) */}
-        <div
-          className="absolute inset-0"
-          style={{
-            backgroundImage: `
-              linear-gradient(45deg, #404040 25%, transparent 25%),
-              linear-gradient(-45deg, #404040 25%, transparent 25%),
-              linear-gradient(45deg, transparent 75%, #404040 75%),
-              linear-gradient(-45deg, transparent 75%, #404040 75%)
-            `,
-            backgroundSize: '20px 20px',
-            backgroundPosition: '0 0, 0 10px, 10px -10px, -10px 0px',
-            backgroundColor: '#808080',
-            opacity: 0.5,
-          }}
-        />
-
-        {/* Layer 1: 圖片層 - 圖片維持原始比例 (naturalWidth*M × naturalHeight*M) */}
-        <div className="absolute inset-0 flex items-center justify-center">
-          <img
-            ref={imageRef}
-            src={src}
-            alt=""
-            onLoad={handleImageLoad}
-            draggable={false}
-            className="max-w-none pointer-events-none"
+        {/* 裁剪層: 棋盤格 + 圖片 + 遮罩 (overflow-hidden) */}
+        <div className="absolute inset-0 overflow-hidden">
+          {/* Layer 0: 棋盤格背景 (用於顯示透明區域) */}
+          <div
+            className="absolute inset-0"
             style={{
-              // 圖片 CSS 尺寸 = 原始尺寸 * M (不隨 baseRotate 對調)
-              // 旋轉由 CSS transform 處理，容器 overflow:hidden 裁剪邊界
-              width: imageInfo ? imageInfo.naturalWidth * imageInfo.displayMultiplier : containerWidth,
-              height: imageInfo ? imageInfo.naturalHeight * imageInfo.displayMultiplier : containerHeight,
-              // transform-origin 必須是 center center
-              transform: imageTransform,
-              transformOrigin: 'center center',
-              willChange: 'transform',
+              backgroundImage: `
+                linear-gradient(45deg, #404040 25%, transparent 25%),
+                linear-gradient(-45deg, #404040 25%, transparent 25%),
+                linear-gradient(45deg, transparent 75%, #404040 75%),
+                linear-gradient(-45deg, transparent 75%, #404040 75%)
+              `,
+              backgroundSize: "20px 20px",
+              backgroundPosition: "0 0, 0 10px, 10px -10px, -10px 0px",
+              backgroundColor: "#808080",
+              opacity: 0.5,
             }}
           />
+
+          {/* Layer 1: 圖片層 - 圖片維持原始比例 (naturalWidth*M × naturalHeight*M) */}
+          <div className="absolute inset-0 flex items-center justify-center">
+            <img
+              ref={imageRef}
+              src={src}
+              alt=""
+              onLoad={handleImageLoad}
+              draggable={false}
+              className="max-w-none pointer-events-none"
+              style={{
+                width: imageInfo
+                  ? imageInfo.naturalWidth * imageInfo.displayMultiplier
+                  : containerWidth,
+                height: imageInfo
+                  ? imageInfo.naturalHeight * imageInfo.displayMultiplier
+                  : containerHeight,
+                transform: imageTransform,
+                transformOrigin: "center center",
+                willChange: "transform",
+              }}
+            />
+          </div>
+
+          {/* Layer 2: 遮罩層 */}
+          {imageInfo && imageLoaded && (
+            <div className="absolute inset-0 pointer-events-none">
+              <div
+                className="absolute bg-black/50"
+                style={{ top: 0, left: 0, right: 0, height: cropY }}
+              />
+              <div
+                className="absolute bg-black/50"
+                style={{ top: cropY + cropH, left: 0, right: 0, bottom: 0 }}
+              />
+              <div
+                className="absolute bg-black/50"
+                style={{ top: cropY, left: 0, width: cropX, height: cropH }}
+              />
+              <div
+                className="absolute bg-black/50"
+                style={{
+                  top: cropY,
+                  left: cropX + cropW,
+                  right: 0,
+                  height: cropH,
+                }}
+              />
+            </div>
+          )}
         </div>
 
+        {/* Layer 3: 裁切框 + 手把 — 不受 overflow-hidden 限制 */}
         {imageInfo && imageLoaded && (
-          <>
-            {/* Layer 2: 遮罩層 */}
-            <div className="absolute inset-0 pointer-events-none">
-              <div className="absolute bg-black/50" style={{ top: 0, left: 0, right: 0, height: cropY }} />
-              <div className="absolute bg-black/50" style={{ top: cropY + cropH, left: 0, right: 0, bottom: 0 }} />
-              <div className="absolute bg-black/50" style={{ top: cropY, left: 0, width: cropX, height: cropH }} />
-              <div className="absolute bg-black/50" style={{ top: cropY, left: cropX + cropW, right: 0, height: cropH }} />
-            </div>
-
-            {/* Layer 3: 裁切框 — highlight color */}
-            <div
-              className="absolute border-2"
-              style={{
-                left: cropX,
-                top: cropY,
-                width: cropW,
-                height: cropH,
-                borderColor: '#D4FF3F',
-              }}
-            >
-              {/* 九宮格 */}
-              <div className="absolute inset-0 grid grid-cols-3 grid-rows-3 pointer-events-none">
-                {[...Array(9)].map((_, i) => (
-                  <div key={i} className="border" style={{ borderColor: 'rgba(212, 255, 63, 0.3)' }} />
-                ))}
-              </div>
-
-              {/* 四角 Handles */}
-              {(['nw', 'ne', 'sw', 'se'] as const).map((handle) => (
+          <div
+            className="absolute border-2 pointer-events-none"
+            style={{
+              left: cropX,
+              top: cropY,
+              width: cropW,
+              height: cropH,
+              borderColor: "#D4FF3F",
+            }}
+          >
+            {/* 九宮格 */}
+            <div className="absolute inset-0 grid grid-cols-3 grid-rows-3 pointer-events-none">
+              {[...Array(9)].map((_, i) => (
                 <div
-                  key={handle}
-                  className="absolute w-4 h-4"
-                  style={{
-                    top: handle.includes('n') ? -8 : 'auto',
-                    bottom: handle.includes('s') ? -8 : 'auto',
-                    left: handle.includes('w') ? -8 : 'auto',
-                    right: handle.includes('e') ? -8 : 'auto',
-                    cursor: handle === 'nw' || handle === 'se' ? 'nwse-resize' : 'nesw-resize',
-                    backgroundColor: '#D4FF3F',
-                    borderRadius: 2,
-                  }}
-                  onMouseDown={handleResizeMouseDown(handle)}
-                />
-              ))}
-
-              {/* 四邊 Handles */}
-              {(['n', 's', 'e', 'w'] as const).map((handle) => (
-                <div
-                  key={handle}
-                  className="absolute"
-                  style={{
-                    backgroundColor: '#D4FF3F',
-                    borderRadius: 3,
-                    ...(handle === 'n' && { top: -3, left: '50%', transform: 'translateX(-50%)', width: 30, height: 6, cursor: 'ns-resize' }),
-                    ...(handle === 's' && { bottom: -3, left: '50%', transform: 'translateX(-50%)', width: 30, height: 6, cursor: 'ns-resize' }),
-                    ...(handle === 'w' && { left: -3, top: '50%', transform: 'translateY(-50%)', width: 6, height: 30, cursor: 'ew-resize' }),
-                    ...(handle === 'e' && { right: -3, top: '50%', transform: 'translateY(-50%)', width: 6, height: 30, cursor: 'ew-resize' }),
-                  }}
-                  onMouseDown={handleResizeMouseDown(handle)}
+                  key={i}
+                  className="border"
+                  style={{ borderColor: "rgba(212, 255, 63, 0.3)" }}
                 />
               ))}
             </div>
-          </>
+
+            {/* 四角 Handles */}
+            {(["nw", "ne", "sw", "se"] as const).map((handle) => (
+              <div
+                key={handle}
+                className="absolute w-4 h-4 pointer-events-auto"
+                style={{
+                  top: handle.includes("n") ? -8 : "auto",
+                  bottom: handle.includes("s") ? -8 : "auto",
+                  left: handle.includes("w") ? -8 : "auto",
+                  right: handle.includes("e") ? -8 : "auto",
+                  cursor:
+                    handle === "nw" || handle === "se"
+                      ? "nwse-resize"
+                      : "nesw-resize",
+                  backgroundColor: "#D4FF3F",
+                  borderRadius: 2,
+                }}
+                onMouseDown={handleResizeMouseDown(handle)}
+              />
+            ))}
+
+            {/* 四邊 Handles */}
+            {(["n", "s", "e", "w"] as const).map((handle) => (
+              <div
+                key={handle}
+                className="absolute pointer-events-auto"
+                style={{
+                  backgroundColor: "#D4FF3F",
+                  borderRadius: 3,
+                  ...(handle === "n" && {
+                    top: -3,
+                    left: "50%",
+                    transform: "translateX(-50%)",
+                    width: 30,
+                    height: 6,
+                    cursor: "ns-resize",
+                  }),
+                  ...(handle === "s" && {
+                    bottom: -3,
+                    left: "50%",
+                    transform: "translateX(-50%)",
+                    width: 30,
+                    height: 6,
+                    cursor: "ns-resize",
+                  }),
+                  ...(handle === "w" && {
+                    left: -3,
+                    top: "50%",
+                    transform: "translateY(-50%)",
+                    width: 6,
+                    height: 30,
+                    cursor: "ew-resize",
+                  }),
+                  ...(handle === "e" && {
+                    right: -3,
+                    top: "50%",
+                    transform: "translateY(-50%)",
+                    width: 6,
+                    height: 30,
+                    cursor: "ew-resize",
+                  }),
+                }}
+                onMouseDown={handleResizeMouseDown(handle)}
+              />
+            ))}
+          </div>
         )}
       </div>
 
@@ -335,7 +412,9 @@ export function ImageEditor({
               onChange={(e) => setScale(parseFloat(e.target.value))}
               className="flex-1"
             />
-            <span className="w-12 text-sm text-right">{Math.round(scale * 100)}%</span>
+            <span className="w-12 text-sm text-right">
+              {Math.round(scale * 100)}%
+            </span>
           </div>
 
           {/* Rotate 滑桿 */}
@@ -350,23 +429,12 @@ export function ImageEditor({
               onChange={(e) => setRotate(parseFloat(e.target.value))}
               className="flex-1"
             />
-            <span className="w-12 text-sm text-right">{Math.round(rotate)}°</span>
+            <span className="w-12 text-sm text-right">
+              {Math.round(rotate)}°
+            </span>
           </div>
         </div>
       )}
-
-      {/* Debug 資訊 */}
-      {import.meta.env.DEV && imageInfo && (
-        <div className="text-xs text-gray-500 font-mono space-y-1">
-          <div>原圖: {imageInfo.naturalWidth} × {imageInfo.naturalHeight}</div>
-          <div>容器: {imageInfo.containerWidth} × {imageInfo.containerHeight} (M: {imageInfo.displayMultiplier.toFixed(2)})</div>
-          <div>image: ({state.imageX}, {state.imageY}), scale: {scale.toFixed(2)}</div>
-          <div>baseRotate: {state.baseRotate}°, rotate: {rotate}°</div>
-          <div>flipX: {state.flipX ? 'Y' : 'N'}, flipY: {state.flipY ? 'Y' : 'N'}</div>
-          <div>cropBox: ({cropX.toFixed(0)}, {cropY.toFixed(0)}) {cropW.toFixed(0)} × {cropH.toFixed(0)}</div>
-          <div>導出尺寸: {(cropW / imageInfo.displayMultiplier).toFixed(0)} × {(cropH / imageInfo.displayMultiplier).toFixed(0)} px</div>
-        </div>
-      )}
     </div>
-  )
+  );
 }

@@ -874,7 +874,7 @@ function App() {
 
   // 已載入圖片: Sidebar + Preview 佈局
   return (
-    <div className="min-h-screen flex">
+    <div className="h-screen flex overflow-hidden bg-sidebar">
       {/* ===== 左側 Sidebar ===== */}
       <aside className="w-[30%] min-w-[240px] max-w-[320px] flex flex-col h-screen sticky top-0 sidebar-scroll overflow-y-auto bg-sidebar">
         {/* 頂部: 標題 */}
@@ -943,7 +943,7 @@ function App() {
       </aside>
 
       {/* ===== 右側預覽區 ===== */}
-      <main className="flex-1 bg-preview flex items-center justify-center min-h-screen p-8">
+      <main className="flex-1 bg-preview flex items-center justify-center m-4 rounded-lg">
         {mode === "preview" || mode === "output" ? (
           <PreviewWorkspace
             previewUrl={pipelineState?.previewUrl ?? null}
