@@ -19,18 +19,32 @@ export interface CropResult {
 }
 
 /**
- * 根據編輯器狀態生成裁切後的圖片 (V7 規格)
+ * 根據編輯器狀態生成裁切後的圖片 (V8 規格)
  *
- * 座標還原策略:
- * 1. 將翻轉 (flip) 從繪製管線中分離，改為 Canvas 後處理
- * 2. 在翻轉軸上反轉 dist 向量，使裁切框追蹤「翻轉前的原始內容」
- * 3. 繪製管線只處理: 旋轉 + 縮放 + img 元素拉伸
- * 4. 最後將整個 Canvas 做鏡像翻轉
+ * 策略: 直接複製 CSS transform 管線
  *
- * 這確保:
- * - 裁切左上角的「頭」，翻轉後仍然是「頭」（只是鏡像），不會變成「腳」
- * - 自由旋轉的偏移在反轉 dist 時已被正確補償
- * - baseRotate=90/270 的非均勻拉伸由 stretch 步驟處理
+ * CSS 的 transform (transform-origin: center center):
+ *   translate(imageX, imageY) scale(flipScaleX, flipScaleY) rotate(totalRotate)
+ *
+ * 等效矩陣:
+ *   T(center) · translate(imageX, imageY) · scale(flip*zoom) · rotate(θ) · T(-center)
+ *
+ * Canvas 變換鏈 (複製 CSS 視覺結果):
+ *   1. scale(1/M)               — display 像素 → canvas 像素
+ *   2. translate(-cropX, -cropY) — 裁切框偏移 (canvas 視窗 = 裁切框區域)
+ *   3. translate(center + offset) — 圖片中心在 display 座標的位置
+ *   4. scale(flip * zoom)        — 翻轉 + 使用者縮放
+ *   5. rotate(totalRotate)       — 旋轉 (baseRotate + freeRotate)
+ *   6. translate(-center)        — 以圖片中心為旋轉原點
+ *   7. drawImage(0, 0, cW, cH)  — 繪製拉伸至容器尺寸的圖片
+ *
+ * 翻轉像素映射 (Mirror Mapping) 由步驟 4 的 scale(-1) 自然實現:
+ *   flipY 時: 畫面上方裁切框取得的是翻轉後位於上方的像素 (即原圖底部)
+ *   flipX 時: 同理，取得原圖右側的像素
+ *
+ * 等效公式 (無旋轉/縮放/偏移時):
+ *   flipY: sy = naturalHeight - (cropY + cropH) / M
+ *   flipX: sx = naturalWidth - (cropX + cropW) / M
  */
 export async function generateCroppedImage(
   image: HTMLImageElement,
@@ -52,7 +66,7 @@ export async function generateCroppedImage(
     cropW,
     cropH,
   } = state
-  const { naturalWidth, naturalHeight, displayMultiplier, containerWidth, containerHeight } = imageInfo
+  const { displayMultiplier, containerWidth, containerHeight } = imageInfo
 
   const M = displayMultiplier
 
@@ -66,49 +80,33 @@ export async function generateCroppedImage(
     throw new Error('無法建立 Canvas Context')
   }
 
-  // 2. 計算裁切框中心到圖片中心的向量 (display 座標系)
-  const imageCenterX = containerWidth / 2 + imageX
-  const imageCenterY = containerHeight / 2 + imageY
-  const distX = (cropX + cropW / 2) - imageCenterX
-  const distY = (cropY + cropH / 2) - imageCenterY
+  // 2. 直接複製 CSS transform 管線
+  //    CSS: translate(imageX, imageY) scale(flipScaleX, flipScaleY) rotate(totalRotate)
+  //    transform-origin: center center → T(center) · CSS · T(-center)
+  const flipScaleX = (flipX ? -1 : 1) * scale
+  const flipScaleY = (flipY ? -1 : 1) * scale
+  const totalRotate = baseRotate + rotate
 
-  // 3. 翻轉補償: 在翻轉軸上反轉距離
-  //    這使裁切框指向「翻轉前」的原始內容位置
-  //    例: 裁切框在畫面上方 (dist < 0)，翻轉後內容跑到下方，
-  //         反轉 dist → 正值 → Canvas 從下方取樣 → 配合後處理翻轉 → 結果正確
-  const ufDistX = flipX ? -distX : distX
-  const ufDistY = flipY ? -distY : distY
-
-  // 4. img 元素拉伸比 (baseRotate=90/270 時為非均勻)
-  const stretchX = containerWidth / naturalWidth
-  const stretchY = containerHeight / naturalHeight
-
-  // 5. Canvas 變換管線
-  //
-  // 步驟 A: 後處理翻轉 (繞 Canvas 中心鏡像)
-  if (flipX || flipY) {
-    ctx.translate(flipX ? canvas.width : 0, flipY ? canvas.height : 0)
-    ctx.scale(flipX ? -1 : 1, flipY ? -1 : 1)
-  }
-
-  // 步驟 B: display → canvas 像素座標
+  // 步驟 1: display → canvas 像素
   ctx.scale(1 / M, 1 / M)
 
-  // 步驟 C: 定位 (使用翻轉補償後的距離)
-  ctx.translate(cropW / 2 - ufDistX, cropH / 2 - ufDistY)
+  // 步驟 2: 裁切框偏移 (canvas 視窗對齊裁切框左上角)
+  ctx.translate(-cropX, -cropY)
 
-  // 步驟 D: 使用者縮放 (不含翻轉，翻轉已由步驟 A 處理)
-  ctx.scale(scale, scale)
+  // 步驟 3: 移至圖片中心 (T(center) · translate(offset))
+  ctx.translate(containerWidth / 2 + imageX, containerHeight / 2 + imageY)
 
-  // 步驟 E: 旋轉 (總角度 = baseRotate + freeRotate)
-  const totalRotate = baseRotate + rotate
+  // 步驟 4: 翻轉 + 使用者縮放
+  ctx.scale(flipScaleX, flipScaleY)
+
+  // 步驟 5: 旋轉
   ctx.rotate((totalRotate * Math.PI) / 180)
 
-  // 步驟 F: img 元素拉伸補償
-  ctx.scale(stretchX, stretchY)
+  // 步驟 6: 回到圖片左上角 (T(-center))
+  ctx.translate(-containerWidth / 2, -containerHeight / 2)
 
-  // 6. 繪製圖片 (以圖片中心為原點)
-  ctx.drawImage(image, -naturalWidth / 2, -naturalHeight / 2, naturalWidth, naturalHeight)
+  // 3. 繪製圖片 (拉伸至容器尺寸，與 CSS img 元素完全一致)
+  ctx.drawImage(image, 0, 0, containerWidth, containerHeight)
 
   // 7. 調整尺寸 (如果有指定目標尺寸)
   let finalCanvas: HTMLCanvasElement = canvas

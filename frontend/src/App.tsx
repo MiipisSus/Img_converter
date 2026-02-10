@@ -648,10 +648,25 @@ function App() {
    */
   const handleFlip = useCallback((axis: 'x' | 'y') => {
     applyTransformAndGenerate((prevState, oldInfo) => {
+      // 鏡像裁切框位置：在圖片顯示範圍內做鏡像
+      // 化簡公式: newCrop = containerSize + 2*imageOffset - crop - cropSize
+      let { cropX, cropY } = prevState
+      if (axis === 'x') {
+        const displayW = oldInfo.containerWidth * prevState.scale
+        const visualLeft = oldInfo.containerWidth / 2 + prevState.imageX - displayW / 2
+        cropX = visualLeft + (displayW - (cropX - visualLeft) - prevState.cropW)
+      } else {
+        const displayH = oldInfo.containerHeight * prevState.scale
+        const visualTop = oldInfo.containerHeight / 2 + prevState.imageY - displayH / 2
+        cropY = visualTop + (displayH - (cropY - visualTop) - prevState.cropH)
+      }
+
       const newState: EditorState = {
         ...prevState,
         flipX: axis === 'x' ? !prevState.flipX : prevState.flipX,
         flipY: axis === 'y' ? !prevState.flipY : prevState.flipY,
+        cropX,
+        cropY,
       }
       return { newState, newInfo: oldInfo }
     })

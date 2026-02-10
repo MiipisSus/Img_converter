@@ -157,6 +157,17 @@ export function ImageEditor({
     }
   }, [isDragging, isResizing, setCropBox, moveCropBox, resizeCropBox])
 
+  // --- 滾輪縮放 ---
+  const handleWheel = useCallback(
+    (e: React.WheelEvent) => {
+      e.preventDefault()
+      // 向前滾 (deltaY < 0) = 放大，向後滾 (deltaY > 0) = 縮小
+      const delta = -e.deltaY * 0.001
+      setScale(state.scale + delta)
+    },
+    [state.scale, setScale]
+  )
+
   const { cropX, cropY, cropW, cropH, scale, rotate } = state
 
   // V6: 容器尺寸由 imageInfo 決定
@@ -175,6 +186,7 @@ export function ImageEditor({
           width: containerWidth,
           height: containerHeight,
         }}
+        onWheel={handleWheel}
       >
         {/* Layer 0: 棋盤格背景 (用於顯示透明區域) */}
         <div
@@ -287,7 +299,7 @@ export function ImageEditor({
               type="range"
               min={1}
               max={3}
-              step={0.1}
+              step={0.01}
               value={scale}
               onChange={(e) => setScale(parseFloat(e.target.value))}
               className="flex-1"

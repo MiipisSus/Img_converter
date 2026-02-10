@@ -214,14 +214,67 @@ export function useImageEditor(options: UseImageEditorOptions | null) {
   }, [])
 
   /**
-   * 翻轉
+   * 翻轉 — 在圖片顯示範圍內鏡像裁切框位置
+   *
+   * 翻轉改變 scale 符號，內容在該軸上以圖片視覺中心為軸鏡像。
+   * 裁切框必須跟著鏡像，才能繼續框住相同的內容。
+   *
+   * 計算步驟:
+   *   1. displayImageH = containerH * scale (圖片受縮放後的顯示高度)
+   *   2. imageVisualTop = containerH/2 + imageY - displayImageH/2 (圖片上緣位置)
+   *   3. relativeCropY = cropY - imageVisualTop (裁切框在圖片內的相對位置)
+   *   4. newRelativeCropY = displayImageH - relativeCropY - cropH (鏡像)
+   *   5. newCropY = imageVisualTop + newRelativeCropY (換算回容器座標)
+   *
+   * 化簡: newCropY = containerH + 2*imageY - cropY - cropH
+   * (此公式對任意旋轉角度皆成立，因為 scale 項在推導中會消去)
+   *
+   * imageX/imageY 不改變 — 圖片視覺位置不動，只有內容鏡像。
    */
   const toggleFlipX = useCallback(() => {
-    setState((prev) => ({ ...prev, flipX: !prev.flipX }))
+    const info = imageInfoRef.current
+    if (!info) return
+    setState((prev) => {
+      // 圖片受縮放後的顯示寬度
+      const displayImageW = info.containerWidth * prev.scale
+      // 圖片視覺左緣在容器座標系的位置
+      const imageVisualLeft = info.containerWidth / 2 + prev.imageX - displayImageW / 2
+      // 裁切框在圖片內的相對位置
+      const relativeCropX = prev.cropX - imageVisualLeft
+      // 在圖片範圍內進行鏡像
+      const newRelativeCropX = displayImageW - relativeCropX - prev.cropW
+      // 換算回容器座標
+      const newCropX = imageVisualLeft + newRelativeCropX
+
+      return {
+        ...prev,
+        flipX: !prev.flipX,
+        cropX: newCropX,
+      }
+    })
   }, [])
 
   const toggleFlipY = useCallback(() => {
-    setState((prev) => ({ ...prev, flipY: !prev.flipY }))
+    const info = imageInfoRef.current
+    if (!info) return
+    setState((prev) => {
+      // 圖片受縮放後的顯示高度
+      const displayImageH = info.containerHeight * prev.scale
+      // 圖片視覺上緣在容器座標系的位置
+      const imageVisualTop = info.containerHeight / 2 + prev.imageY - displayImageH / 2
+      // 裁切框在圖片內的相對位置
+      const relativeCropY = prev.cropY - imageVisualTop
+      // 在圖片範圍內進行鏡像
+      const newRelativeCropY = displayImageH - relativeCropY - prev.cropH
+      // 換算回容器座標
+      const newCropY = imageVisualTop + newRelativeCropY
+
+      return {
+        ...prev,
+        flipY: !prev.flipY,
+        cropY: newCropY,
+      }
+    })
   }, [])
 
   // 移動裁切框
