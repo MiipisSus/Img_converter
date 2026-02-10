@@ -21,24 +21,16 @@ export interface CropResult {
 /**
  * 根據編輯器狀態生成裁切後的圖片 (V7 規格)
  *
- * V7 核心概念:
- * - UI 座標系使用 displayMultiplier (M) 放大/縮小顯示
- * - 導出時必須除以 M 還原為原始像素尺寸
- * - 支援 baseRotate (0, 90, 180, 270) 和 flipX/flipY
+ * 座標還原策略:
+ * 1. 將翻轉 (flip) 從繪製管線中分離，改為 Canvas 後處理
+ * 2. 在翻轉軸上反轉 dist 向量，使裁切框追蹤「翻轉前的原始內容」
+ * 3. 繪製管線只處理: 旋轉 + 縮放 + img 元素拉伸
+ * 4. 最後將整個 Canvas 做鏡像翻轉
  *
- * 統一變換順序 (Canonical Order) - CSS 和 Canvas 必須一致:
- * 1. Translate (平移至中心)
- * 2. Scale + Flip (縮放，含翻轉)
- * 3. Rotate (總角度 = baseRotate + freeRotate)
- *
- * 這確保翻轉是基於圖片自身的軸，而旋轉是最後施加的視覺效果。
- * 使用者點擊『水平翻轉』時，圖片以『自身中軸』做鏡像。
- *
- * Canvas 導出公式:
- * 1. canvas.width = cropBox.w / M, canvas.height = cropBox.h / M
- * 2. 計算 UI 向量差並除以 M 轉換為原始像素
- * 3. 按順序執行變換: translate → scale(flip) → rotate(totalAngle)
- * 4. drawImage 使用原始像素尺寸
+ * 這確保:
+ * - 裁切左上角的「頭」，翻轉後仍然是「頭」（只是鏡像），不會變成「腳」
+ * - 自由旋轉的偏移在反轉 dist 時已被正確補償
+ * - baseRotate=90/270 的非均勻拉伸由 stretch 步驟處理
  */
 export async function generateCroppedImage(
   image: HTMLImageElement,
@@ -62,10 +54,9 @@ export async function generateCroppedImage(
   } = state
   const { naturalWidth, naturalHeight, displayMultiplier, containerWidth, containerHeight } = imageInfo
 
-  // M = displayMultiplier
   const M = displayMultiplier
 
-  // 1. 畫布準備：除以 M 還原為原始像素尺寸
+  // 1. 畫布尺寸 = 裁切框的原始像素尺寸
   const canvas = document.createElement('canvas')
   canvas.width = Math.round(cropW / M)
   canvas.height = Math.round(cropH / M)
@@ -75,52 +66,61 @@ export async function generateCroppedImage(
     throw new Error('無法建立 Canvas Context')
   }
 
-  // 2. 計算 UI 向量差 (在容器座標系中)
-  // 裁切框中心 (UI 座標)
-  const cropCenterX = cropX + cropW / 2
-  const cropCenterY = cropY + cropH / 2
-
-  // 圖片中心 (UI 座標) = 容器中心 + 圖片偏移
+  // 2. 計算裁切框中心到圖片中心的向量 (display 座標系)
   const imageCenterX = containerWidth / 2 + imageX
   const imageCenterY = containerHeight / 2 + imageY
+  const distX = (cropX + cropW / 2) - imageCenterX
+  const distY = (cropY + cropH / 2) - imageCenterY
 
-  // UI 向量差
-  const distX = cropCenterX - imageCenterX
-  const distY = cropCenterY - imageCenterY
+  // 3. 翻轉補償: 在翻轉軸上反轉距離
+  //    這使裁切框指向「翻轉前」的原始內容位置
+  //    例: 裁切框在畫面上方 (dist < 0)，翻轉後內容跑到下方，
+  //         反轉 dist → 正值 → Canvas 從下方取樣 → 配合後處理翻轉 → 結果正確
+  const ufDistX = flipX ? -distX : distX
+  const ufDistY = flipY ? -distY : distY
 
-  // 3. 轉換為原始像素向量 (除以 M)
-  const distX_orig = distX / M
-  const distY_orig = distY / M
+  // 4. img 元素拉伸比 (baseRotate=90/270 時為非均勻)
+  const stretchX = containerWidth / naturalWidth
+  const stretchY = containerHeight / naturalHeight
 
-  // 4. 座標變換步驟 (統一變換順序)
-  // 4.1 平移到「圖片中心相對於 Canvas 中心」的位置 (原始像素座標)
-  ctx.translate(canvas.width / 2 - distX_orig, canvas.height / 2 - distY_orig)
+  // 5. Canvas 變換管線
+  //
+  // 步驟 A: 後處理翻轉 (繞 Canvas 中心鏡像)
+  if (flipX || flipY) {
+    ctx.translate(flipX ? canvas.width : 0, flipY ? canvas.height : 0)
+    ctx.scale(flipX ? -1 : 1, flipY ? -1 : 1)
+  }
 
-  // 4.2 縮放 + 翻轉 (翻轉在旋轉之前，確保翻轉是基於圖片自身的軸)
-  const flipScaleX = (flipX ? -1 : 1) * scale
-  const flipScaleY = (flipY ? -1 : 1) * scale
-  ctx.scale(flipScaleX, flipScaleY)
+  // 步驟 B: display → canvas 像素座標
+  ctx.scale(1 / M, 1 / M)
 
-  // 4.3 旋轉 (總角度 = baseRotate + freeRotate)
+  // 步驟 C: 定位 (使用翻轉補償後的距離)
+  ctx.translate(cropW / 2 - ufDistX, cropH / 2 - ufDistY)
+
+  // 步驟 D: 使用者縮放 (不含翻轉，翻轉已由步驟 A 處理)
+  ctx.scale(scale, scale)
+
+  // 步驟 E: 旋轉 (總角度 = baseRotate + freeRotate)
   const totalRotate = baseRotate + rotate
   ctx.rotate((totalRotate * Math.PI) / 180)
 
-  // 5. 繪製圖片 (使用原始像素尺寸)
+  // 步驟 F: img 元素拉伸補償
+  ctx.scale(stretchX, stretchY)
+
+  // 6. 繪製圖片 (以圖片中心為原點)
   ctx.drawImage(image, -naturalWidth / 2, -naturalHeight / 2, naturalWidth, naturalHeight)
 
-  // 6. 調整尺寸 (如果有指定目標尺寸)
+  // 7. 調整尺寸 (如果有指定目標尺寸)
   let finalCanvas: HTMLCanvasElement = canvas
   const croppedWidth = canvas.width
   const croppedHeight = canvas.height
 
-  // 檢查是否需要縮放
   const needsResize =
     targetWidth !== undefined &&
     targetHeight !== undefined &&
     (targetWidth !== croppedWidth || targetHeight !== croppedHeight)
 
   if (needsResize) {
-    // 建立縮放用的新 Canvas
     const resizeCanvas = document.createElement('canvas')
     resizeCanvas.width = targetWidth!
     resizeCanvas.height = targetHeight!
@@ -130,11 +130,8 @@ export async function generateCroppedImage(
       throw new Error('無法建立 Resize Canvas Context')
     }
 
-    // 使用高品質縮放
     resizeCtx.imageSmoothingEnabled = true
     resizeCtx.imageSmoothingQuality = 'high'
-
-    // 將裁切後的圖片繪製到縮放 Canvas
     resizeCtx.drawImage(canvas, 0, 0, croppedWidth, croppedHeight, 0, 0, targetWidth!, targetHeight!)
 
     finalCanvas = resizeCanvas
