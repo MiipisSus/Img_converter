@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from 'react'
+import { useState, useCallback, useRef, useEffect } from 'react'
 import { ImageEditor } from './components/ImageEditor'
 import { generateCroppedImage, type CropResult } from './utils/generateCroppedImage'
 import type { EditorState, ImageInfo } from './hooks/useImageEditor'
@@ -367,7 +367,7 @@ function App() {
         outputHeight: result.height,
       }))
 
-      // 初始化輸出設定 (暫態)
+      // 初始化輸出設定 (暫態)，包含初始檔案大小
       setOutputSettings({
         targetWidth: croppedSize.width,
         targetHeight: croppedSize.height,
@@ -378,7 +378,7 @@ function App() {
         quality: 92,
         targetKB: null,
         enableTargetKB: false,
-        lastExportSize: null,
+        lastExportSize: result.blob.size,
       })
 
       setMode('output')
@@ -867,6 +867,71 @@ function CropToolPanel({
   )
 }
 
+/** 可點擊編輯的數字顯示 */
+function EditableNumber({
+  value,
+  min,
+  max,
+  suffix = '',
+  onChange,
+}: {
+  value: number
+  min: number
+  max: number
+  suffix?: string
+  onChange: (value: number) => void
+}) {
+  const [editing, setEditing] = useState(false)
+  const [inputValue, setInputValue] = useState(String(value))
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  const commit = () => {
+    setEditing(false)
+    const num = parseInt(inputValue)
+    if (!isNaN(num) && num >= min && num <= max) {
+      onChange(num)
+    } else {
+      setInputValue(String(value))
+    }
+  }
+
+  if (editing) {
+    return (
+      <input
+        ref={inputRef}
+        type="number"
+        min={min}
+        max={max}
+        value={inputValue}
+        onChange={(e) => setInputValue(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') commit()
+          if (e.key === 'Escape') {
+            setInputValue(String(value))
+            setEditing(false)
+          }
+        }}
+        autoFocus
+        className="w-14 px-1 py-0 text-xs text-right border border-blue-400 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
+      />
+    )
+  }
+
+  return (
+    <span
+      onClick={() => {
+        setInputValue(String(value))
+        setEditing(true)
+      }}
+      className="text-xs text-gray-600 font-medium cursor-pointer hover:text-blue-600 hover:underline"
+      title="點擊輸入數值"
+    >
+      {value}{suffix}
+    </span>
+  )
+}
+
 /** 輸出設定面板 */
 function OutputSettingsPanel({
   settings,
@@ -1066,53 +1131,68 @@ function OutputSettingsPanel({
           ))}
         </div>
 
-        {/* 品質滑桿 (僅 JPEG/WebP) */}
-        {format !== 'png' && (
-          <div className="mb-3">
-            <div className="flex items-center justify-between mb-1">
-              <span className="text-xs text-gray-500">品質</span>
-              <span className="text-xs text-gray-600 font-medium">{settings.quality}%</span>
-            </div>
-            <input
-              type="range"
-              min={10}
-              max={100}
-              step={1}
-              value={settings.quality}
-              onChange={(e) => onUpdateSettings({ quality: parseInt(e.target.value) })}
-              className="w-full h-1.5 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-blue-500"
-            />
-            <div className="flex justify-between text-[10px] text-gray-400 mt-0.5">
-              <span>小檔案</span>
-              <span>高品質</span>
-            </div>
-          </div>
-        )}
-
         {/* PNG 說明 */}
         {format === 'png' && (
           <p className="text-xs text-gray-400 mb-3">PNG 為無損格式，不支援品質調整</p>
         )}
 
-        {/* 目標 KB 壓縮 */}
+        {/* 壓縮模式切換 (僅 JPEG/WebP) */}
         {format !== 'png' && (
           <div className="pt-3 border-t border-gray-100">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-xs text-gray-500">限制檔案大小</span>
+            {/* 模式選擇按鈕 */}
+            <div className="flex gap-1 mb-3 bg-gray-100 rounded p-0.5">
               <button
-                onClick={() => onUpdateSettings({ enableTargetKB: !settings.enableTargetKB })}
-                className={`relative w-8 h-4 rounded-full transition-colors flex-shrink-0 ${
-                  settings.enableTargetKB ? 'bg-blue-500' : 'bg-gray-300'
+                onClick={() => onUpdateSettings({ enableTargetKB: false })}
+                className={`flex-1 px-2 py-1 text-xs rounded transition-colors ${
+                  !settings.enableTargetKB
+                    ? 'bg-white text-gray-800 shadow-sm font-medium'
+                    : 'text-gray-500 hover:text-gray-700'
                 }`}
               >
-                <span
-                  className={`absolute top-0.5 left-0.5 w-3 h-3 bg-white rounded-full shadow transition-transform ${
-                    settings.enableTargetKB ? 'translate-x-4' : 'translate-x-0'
-                  }`}
-                />
+                品質控制
+              </button>
+              <button
+                onClick={() => onUpdateSettings({ enableTargetKB: true })}
+                className={`flex-1 px-2 py-1 text-xs rounded transition-colors ${
+                  settings.enableTargetKB
+                    ? 'bg-white text-gray-800 shadow-sm font-medium'
+                    : 'text-gray-500 hover:text-gray-700'
+                }`}
+              >
+                限制檔案大小
               </button>
             </div>
 
+            {/* 品質滑桿 */}
+            {!settings.enableTargetKB && (
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-xs text-gray-500">品質</span>
+                  <EditableNumber
+                    value={settings.quality}
+                    min={10}
+                    max={100}
+                    suffix="%"
+                    onChange={(val) => onUpdateSettings({ quality: val })}
+                  />
+                </div>
+                <input
+                  type="range"
+                  min={10}
+                  max={100}
+                  step={1}
+                  value={settings.quality}
+                  onChange={(e) => onUpdateSettings({ quality: parseInt(e.target.value) })}
+                  className="w-full h-1.5 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-blue-500"
+                />
+                <div className="flex justify-between text-[10px] text-gray-400 mt-0.5">
+                  <span>小檔案</span>
+                  <span>高品質</span>
+                </div>
+              </div>
+            )}
+
+            {/* 目標 KB 輸入 */}
             {settings.enableTargetKB && (
               <div className="flex items-center gap-2">
                 <span className="text-xs text-gray-500">目標</span>
