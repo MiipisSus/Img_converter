@@ -123,3 +123,13 @@ cropBox: { x: number; y: number; w: number; h: number };
             ctx.scale(image.scale, image.scale);
 
             ctx.drawImage(img, -img.naturalWidth / 2, -img.naturalHeight / 2);
+
+5. 旋轉與位移保護邏輯 (Rotation & Boundary Protection)
+
+   自動覆蓋縮放 (Auto-Fit Scale):
+   當 image.rotate 變動時，image.scale 必須 ≥ 覆蓋容器所需的最小倍率 Smin​。
+   Smin​=effW⋅∣cosθ∣+effH⋅∣sinθ∣​/min(effW,effH)⋅M
+
+   位移限制 (Containment):
+   圖片在任何角度下，其視覺包絡線必須完全覆蓋容器 (effW⋅M,effH⋅M)。
+   若 imageVisualWidth > ContainerWidth，則 image.x 的最大偏移量為 ±(imageVisualWidth−ContainerWidth)/2。

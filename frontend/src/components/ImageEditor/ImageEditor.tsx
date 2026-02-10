@@ -47,7 +47,7 @@ export function ImageEditor({
     setScale,
     setRotate,
     setImagePosition,
-    snapImageToCropBox,
+    clampImage,
     rotateBy90,
     toggleFlipX,
     toggleFlipY,
@@ -150,7 +150,7 @@ export function ImageEditor({
       setIsResizing(null)
       setIsDraggingImage(false)
       // 邊界回彈：確保裁切框在圖片範圍內
-      snapImageToCropBox()
+      clampImage()
     }
 
     if (isResizing || isDraggingImage) {
@@ -161,7 +161,7 @@ export function ImageEditor({
         window.removeEventListener('mouseup', handleMouseUp)
       }
     }
-  }, [isResizing, isDraggingImage, setCropBox, resizeCropBox, setImagePosition, snapImageToCropBox])
+  }, [isResizing, isDraggingImage, setCropBox, resizeCropBox, setImagePosition, clampImage])
 
   // --- 滾輪縮放 ---
   const handleWheel = useCallback(

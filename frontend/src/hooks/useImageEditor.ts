@@ -102,18 +102,17 @@ function calculateDisplayMultiplier(effW: number, effH: number): number {
 }
 
 /**
- * 計算旋轉自動貼合所需的最小縮放倍率
+ * 計算覆蓋容器四角所需的最小縮放倍率
  *
- * 確保自由旋轉後的圖片完全覆蓋容器（無黑邊）。
- * 公式對任何 baseRotate 值皆正確（baseRotate 只影響容器尺寸，
- * 自動貼合只需考慮自由旋轉角度和原始圖片比例）。
+ * 將容器四角反旋轉到圖片座標系，取最大投影距離。
+ * 數學上只需自由旋轉角度和原始圖片尺寸（不依賴 baseRotate）。
  *
- * 推導：旋轉 θ 度後，圖片外接矩形需覆蓋容器：
+ * 推導：
  *   寬度約束: S >= |cos(θ)| + (H/W) * |sin(θ)|
  *   高度約束: S >= |cos(θ)| + (W/H) * |sin(θ)|
- *   neededScale = max(兩者)
+ *   S_needed = max(1, 兩者)
  */
-function calculateAutoFitScale(
+function getRequiredScale(
   rotate: number,
   naturalWidth: number,
   naturalHeight: number
@@ -121,67 +120,62 @@ function calculateAutoFitScale(
   const rad = Math.abs(rotate * Math.PI / 180)
   const cosR = Math.abs(Math.cos(rad))
   const sinR = Math.abs(Math.sin(rad))
-  const s1 = cosR + (naturalHeight / naturalWidth) * sinR
-  const s2 = cosR + (naturalWidth / naturalHeight) * sinR
-  return Math.max(s1, s2)
+  const sw = cosR + (naturalHeight / naturalWidth) * sinR
+  const sh = cosR + (naturalWidth / naturalHeight) * sinR
+  return Math.max(1, sw, sh)
 }
 
 /**
- * 計算圖片回彈位置 — 確保圖片完全覆蓋容器範圍（無黑邊）
+ * 限制圖片位置 — 確保容器四角皆落在旋轉後的圖片矩形內
+ *
+ * 核心：在圖片的旋轉座標系中做 clamp（該座標系中圖片是軸對齊矩形）
  *
  * 演算法：
- *   1. 計算旋轉後圖片的軸對齊邊界框 (AABB)
- *   2. 比較 AABB 四邊與容器四邊
- *   3. 若某邊超出容器內側，將 imageX/imageY 修正回貼齊
+ *   1. 計算容器四角在旋轉座標系中的最大投影半徑 Ru, Rv
+ *   2. 圖片半寬 hw, 半高 hh → 旋轉座標系中可偏移量 maxKu = hw - Ru
+ *   3. 將 (imageX, imageY) 投影到旋轉座標 (Ku, Kv)，做對稱 clamp
+ *   4. 反旋轉回螢幕座標得到修正後的 (imageX, imageY)
  *
- * 若圖片 AABB 小於容器（某軸），則居中對齊該軸。
+ * 為什麼不能用 AABB：
+ *   AABB 比實際旋轉矩形大，在角落處有間隙。
+ *   用 AABB 的 maxDx 會允許圖片移動過多，導致旋轉矩形的邊露出背景。
  */
-function computeSnapBack(
+function clampImagePosition(
   state: EditorState,
   imageInfo: ImageInfo
 ): { imageX: number; imageY: number } | null {
   const { imageX, imageY, scale, rotate, baseRotate } = state
-  const { naturalWidth, naturalHeight, displayMultiplier: M, containerWidth, containerHeight } = imageInfo
+  const { naturalWidth, naturalHeight, displayMultiplier: M, containerWidth: cW, containerHeight: cH } = imageInfo
 
-  const imgW = naturalWidth * M * scale
-  const imgH = naturalHeight * M * scale
+  // 圖片在旋轉座標系中的半寬/半高
+  const hw = naturalWidth * M * scale / 2
+  const hh = naturalHeight * M * scale / 2
 
-  const totalRotateRad = (baseRotate + rotate) * Math.PI / 180
-  const cosT = Math.abs(Math.cos(totalRotateRad))
-  const sinT = Math.abs(Math.sin(totalRotateRad))
+  const totalRad = (baseRotate + rotate) * Math.PI / 180
+  const cosT = Math.cos(totalRad)
+  const sinT = Math.sin(totalRad)
+  const absCos = Math.abs(cosT)
+  const absSin = Math.abs(sinT)
 
-  // 旋轉後的軸對齊邊界框 (AABB)
-  const boundingW = imgW * cosT + imgH * sinT
-  const boundingH = imgW * sinT + imgH * cosT
+  // 容器四角 (±cW/2, ±cH/2) 在旋轉座標系中的最大投影半徑
+  const Ru = cW / 2 * absCos + cH / 2 * absSin
+  const Rv = cW / 2 * absSin + cH / 2 * absCos
 
-  // 圖片視覺中心 = 容器中心 + 偏移
-  const imgCenterX = containerWidth / 2 + imageX
-  const imgCenterY = containerHeight / 2 + imageY
+  // 旋轉座標系中的最大可偏移量（若 < 0 表示圖片不夠大，強制居中）
+  const maxKu = Math.max(0, hw - Ru)
+  const maxKv = Math.max(0, hh - Rv)
 
-  // 視覺邊界
-  const visualLeft = imgCenterX - boundingW / 2
-  const visualRight = imgCenterX + boundingW / 2
-  const visualTop = imgCenterY - boundingH / 2
-  const visualBottom = imgCenterY + boundingH / 2
+  // 當前 (imageX, imageY) 投影到旋轉座標系
+  const Ku = imageX * cosT + imageY * sinT
+  const Kv = -imageX * sinT + imageY * cosT
 
-  let newImageX = imageX
-  let newImageY = imageY
+  // 對稱 clamp
+  const clampedKu = Math.max(-maxKu, Math.min(maxKu, Ku))
+  const clampedKv = Math.max(-maxKv, Math.min(maxKv, Kv))
 
-  // 水平回彈
-  if (boundingW >= containerWidth) {
-    if (visualLeft > 0) newImageX = imageX - visualLeft
-    else if (visualRight < containerWidth) newImageX = imageX + (containerWidth - visualRight)
-  } else {
-    newImageX = 0
-  }
-
-  // 垂直回彈
-  if (boundingH >= containerHeight) {
-    if (visualTop > 0) newImageY = imageY - visualTop
-    else if (visualBottom < containerHeight) newImageY = imageY + (containerHeight - visualBottom)
-  } else {
-    newImageY = 0
-  }
+  // 反旋轉回螢幕座標
+  const newImageX = cosT * clampedKu - sinT * clampedKv
+  const newImageY = sinT * clampedKu + cosT * clampedKv
 
   if (Math.abs(newImageX - imageX) < 0.5 && Math.abs(newImageY - imageY) < 0.5) return null
 
@@ -259,7 +253,7 @@ export function useImageEditor(options: UseImageEditorOptions | null) {
       let newScale = Math.max(1, Math.min(5, scale))
       const dims = naturalDimensionsRef.current
       if (dims) {
-        const minScale = calculateAutoFitScale(prev.rotate, dims.width, dims.height)
+        const minScale = getRequiredScale(prev.rotate, dims.width, dims.height)
         newScale = Math.max(newScale, minScale)
       }
       return { ...prev, scale: newScale }
@@ -272,7 +266,7 @@ export function useImageEditor(options: UseImageEditorOptions | null) {
     setState((prev) => {
       const dims = naturalDimensionsRef.current
       if (dims) {
-        const minScale = calculateAutoFitScale(clamped, dims.width, dims.height)
+        const minScale = getRequiredScale(clamped, dims.width, dims.height)
         return { ...prev, rotate: clamped, scale: Math.max(1, minScale) }
       }
       return { ...prev, rotate: clamped }
@@ -513,11 +507,11 @@ export function useImageEditor(options: UseImageEditorOptions | null) {
   )
 
   // 邊界回彈：確保裁切框在圖片範圍內
-  const snapImageToCropBox = useCallback(() => {
+  const clampImage = useCallback(() => {
     const info = imageInfoRef.current
     if (!info) return
     setState((prev) => {
-      const result = computeSnapBack(prev, info)
+      const result = clampImagePosition(prev, info)
       if (!result) return prev
       return { ...prev, imageX: result.imageX, imageY: result.imageY }
     })
@@ -552,7 +546,7 @@ export function useImageEditor(options: UseImageEditorOptions | null) {
     setScale,
     setRotate,
     setImagePosition,
-    snapImageToCropBox,
+    clampImage,
     rotateBy90,
     toggleFlipX,
     toggleFlipY,
