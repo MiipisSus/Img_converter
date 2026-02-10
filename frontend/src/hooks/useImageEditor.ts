@@ -247,7 +247,11 @@ export function useImageEditor(options: UseImageEditorOptions | null) {
     [initialStateOption]
   )
 
-  // 設定縮放 (強制自動貼合：不允許低於旋轉所需最小倍率)
+  // 用於邊界檢查的 imageInfo ref (須在 setScale/setRotate 之前宣告)
+  const imageInfoRef = useRef<ImageInfo | null>(null)
+  imageInfoRef.current = imageInfo
+
+  // 設定縮放 (強制自動貼合 + 即時位移校正)
   const setScale = useCallback((scale: number) => {
     setState((prev) => {
       let newScale = Math.max(1, Math.min(5, scale))
@@ -256,20 +260,36 @@ export function useImageEditor(options: UseImageEditorOptions | null) {
         const minScale = getRequiredScale(prev.rotate, dims.width, dims.height)
         newScale = Math.max(newScale, minScale)
       }
-      return { ...prev, scale: newScale }
+      // 先更新 scale，再校正位移
+      const updated = { ...prev, scale: newScale }
+      const info = imageInfoRef.current
+      if (info) {
+        const result = clampImagePosition(updated, info)
+        if (result) return { ...updated, imageX: result.imageX, imageY: result.imageY }
+      }
+      return updated
     })
   }, [])
 
-  // 設定旋轉 (-180 ~ 180, 強制自動貼合)
+  // 設定旋轉 (-180 ~ 180, 強制自動貼合 + 即時位移校正)
+  // 順序：旋轉 → 自動縮放 → 校正位移
   const setRotate = useCallback((rotate: number) => {
-    const clamped = Math.max(-180, Math.min(180, rotate))
+    const clampedRotate = Math.max(-180, Math.min(180, rotate))
     setState((prev) => {
       const dims = naturalDimensionsRef.current
+      let newScale = prev.scale
       if (dims) {
-        const minScale = getRequiredScale(clamped, dims.width, dims.height)
-        return { ...prev, rotate: clamped, scale: Math.max(1, minScale) }
+        const minScale = getRequiredScale(clampedRotate, dims.width, dims.height)
+        newScale = Math.max(1, minScale)
       }
-      return { ...prev, rotate: clamped }
+      // 先更新 rotate + scale，再校正位移
+      const updated = { ...prev, rotate: clampedRotate, scale: newScale }
+      const info = imageInfoRef.current
+      if (info) {
+        const result = clampImagePosition(updated, info)
+        if (result) return { ...updated, imageX: result.imageX, imageY: result.imageY }
+      }
+      return updated
     })
   }, [])
 
@@ -277,10 +297,6 @@ export function useImageEditor(options: UseImageEditorOptions | null) {
   const setImagePosition = useCallback((x: number, y: number) => {
     setState((prev) => ({ ...prev, imageX: x, imageY: y }))
   }, [])
-
-  // 用於邊界檢查的 imageInfo ref
-  const imageInfoRef = useRef<ImageInfo | null>(null)
-  imageInfoRef.current = imageInfo
 
   /**
    * 90° 旋轉 (重新計算容器尺寸)
