@@ -82,6 +82,20 @@ cropBox: { x: number; y: number; w: number; h: number };
 
     User Scale (使用者縮放)
 
+新增功能：自動貼合旋轉 (Auto-Fit Rotation)
+
+    狀態開關：isAutoFitEnabled: boolean（預設為 false）。
+
+    觸發時機：當 image.rotate 變動且 isAutoFitEnabled 為 true 時。
+
+    邏輯行為：
+
+        計算目前自由旋轉角度 θ 的弧度。
+
+        根據三角函數計算覆蓋容器所需的最小縮放倍率 Smin​。
+
+        自動更新 image.scale 為 Smin​（若使用者手動縮放值大於 Smin​，則維持使用者數值）。
+
 4. Canvas 導出公式 (Pixel-Back Logic)
 
 導出時須消除 M 的影響以還原原始像素：

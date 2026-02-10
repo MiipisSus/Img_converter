@@ -34,7 +34,8 @@ export function ImageEditor({
   // 拖動狀態
   const [isDragging, setIsDragging] = useState(false)
   const [isResizing, setIsResizing] = useState<ResizeHandle | null>(null)
-  const dragStartRef = useRef({ x: 0, y: 0, cropX: 0, cropY: 0, cropW: 0, cropH: 0 })
+  const [isDraggingImage, setIsDraggingImage] = useState(false)
+  const dragStartRef = useRef({ x: 0, y: 0, cropX: 0, cropY: 0, cropW: 0, cropH: 0, imageX: 0, imageY: 0 })
 
   // V5: useImageEditor 不再需要 viewport 尺寸參數
   const editor = useImageEditor({ initialState })
@@ -43,9 +44,12 @@ export function ImageEditor({
     state,
     imageInfo,
     imageTransform,
+    isAutoFitEnabled,
     initialize,
     setScale,
     setRotate,
+    setImagePosition,
+    setAutoFitEnabled,
     rotateBy90,
     toggleFlipX,
     toggleFlipY,
@@ -97,6 +101,8 @@ export function ImageEditor({
         cropY: state.cropY,
         cropW: state.cropW,
         cropH: state.cropH,
+        imageX: 0,
+        imageY: 0,
       }
     },
     [state.cropX, state.cropY, state.cropW, state.cropH]
@@ -114,9 +120,30 @@ export function ImageEditor({
         cropY: state.cropY,
         cropW: state.cropW,
         cropH: state.cropH,
+        imageX: 0,
+        imageY: 0,
       }
     },
     [state.cropX, state.cropY, state.cropW, state.cropH]
+  )
+
+  // --- 拖動圖片 (scale > 1 時，點擊裁切框外) ---
+  const handleContainerMouseDown = useCallback(
+    (e: React.MouseEvent) => {
+      if (state.scale <= 1) return
+      setIsDraggingImage(true)
+      dragStartRef.current = {
+        x: e.clientX,
+        y: e.clientY,
+        cropX: 0,
+        cropY: 0,
+        cropW: 0,
+        cropH: 0,
+        imageX: state.imageX,
+        imageY: state.imageY,
+      }
+    },
+    [state.scale, state.imageX, state.imageY]
   )
 
   // --- 全域滑鼠事件 ---
@@ -139,15 +166,21 @@ export function ImageEditor({
           cropH: dragStartRef.current.cropH,
         })
         resizeCropBox(isResizing, deltaX, deltaY)
+      } else if (isDraggingImage) {
+        setImagePosition(
+          dragStartRef.current.imageX + deltaX,
+          dragStartRef.current.imageY + deltaY
+        )
       }
     }
 
     const handleMouseUp = () => {
       setIsDragging(false)
       setIsResizing(null)
+      setIsDraggingImage(false)
     }
 
-    if (isDragging || isResizing) {
+    if (isDragging || isResizing || isDraggingImage) {
       window.addEventListener('mousemove', handleMouseMove)
       window.addEventListener('mouseup', handleMouseUp)
       return () => {
@@ -155,7 +188,7 @@ export function ImageEditor({
         window.removeEventListener('mouseup', handleMouseUp)
       }
     }
-  }, [isDragging, isResizing, setCropBox, moveCropBox, resizeCropBox])
+  }, [isDragging, isResizing, isDraggingImage, setCropBox, moveCropBox, resizeCropBox, setImagePosition])
 
   // --- 滾輪縮放 ---
   const handleWheel = useCallback(
@@ -185,8 +218,10 @@ export function ImageEditor({
         style={{
           width: containerWidth,
           height: containerHeight,
+          cursor: isDraggingImage ? 'grabbing' : scale > 1 ? 'grab' : 'default',
         }}
         onWheel={handleWheel}
+        onMouseDown={handleContainerMouseDown}
       >
         {/* Layer 0: 棋盤格背景 (用於顯示透明區域) */}
         <div
@@ -244,7 +279,7 @@ export function ImageEditor({
                 top: cropY,
                 width: cropW,
                 height: cropH,
-                cursor: isDragging ? 'grabbing' : 'grab',
+                cursor: isDragging ? 'grabbing' : 'move',
               }}
               onMouseDown={handleCropBoxMouseDown}
             >
@@ -333,6 +368,27 @@ export function ImageEditor({
               suffix="°"
               onChange={(v) => setRotate(v)}
             />
+          </div>
+
+          {/* 自動貼合開關 */}
+          <div className="flex items-center gap-3">
+            <span className="w-16" />
+            <button
+              type="button"
+              role="switch"
+              aria-checked={isAutoFitEnabled}
+              onClick={() => setAutoFitEnabled(!isAutoFitEnabled)}
+              className={`relative inline-flex h-5 w-9 flex-shrink-0 items-center rounded-full transition-colors ${
+                isAutoFitEnabled ? 'bg-blue-500' : 'bg-gray-300'
+              }`}
+            >
+              <span
+                className={`inline-block h-3.5 w-3.5 rounded-full bg-white shadow-sm transition-transform ${
+                  isAutoFitEnabled ? 'translate-x-[18px]' : 'translate-x-[2px]'
+                }`}
+              />
+            </button>
+            <span className="text-sm text-gray-500">旋轉時自動貼合</span>
           </div>
         </div>
       )}

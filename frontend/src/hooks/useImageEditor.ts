@@ -101,6 +101,31 @@ function calculateDisplayMultiplier(effW: number, effH: number): number {
   return 1
 }
 
+/**
+ * 計算旋轉自動貼合所需的最小縮放倍率
+ *
+ * 確保自由旋轉後的圖片完全覆蓋容器（無黑邊）。
+ * 公式對任何 baseRotate 值皆正確（baseRotate 只影響容器尺寸，
+ * 自動貼合只需考慮自由旋轉角度和原始圖片比例）。
+ *
+ * 推導：旋轉 θ 度後，圖片外接矩形需覆蓋容器：
+ *   寬度約束: S >= |cos(θ)| + (H/W) * |sin(θ)|
+ *   高度約束: S >= |cos(θ)| + (W/H) * |sin(θ)|
+ *   neededScale = max(兩者)
+ */
+function calculateAutoFitScale(
+  rotate: number,
+  naturalWidth: number,
+  naturalHeight: number
+): number {
+  const rad = Math.abs(rotate * Math.PI / 180)
+  const cosR = Math.abs(Math.cos(rad))
+  const sinR = Math.abs(Math.sin(rad))
+  const s1 = cosR + (naturalHeight / naturalWidth) * sinR
+  const s2 = cosR + (naturalWidth / naturalHeight) * sinR
+  return Math.max(s1, s2)
+}
+
 export function useImageEditor(options: UseImageEditorOptions | null) {
   const [state, setState] = useState<EditorState>(DEFAULT_STATE)
   const [imageInfo, setImageInfo] = useState<ImageInfo | null>(null)
@@ -108,6 +133,10 @@ export function useImageEditor(options: UseImageEditorOptions | null) {
 
   // 保存原始圖片尺寸供 90° 旋轉重算使用
   const naturalDimensionsRef = useRef<{ width: number; height: number } | null>(null)
+
+  // 自動貼合旋轉
+  const [isAutoFitEnabled, _setIsAutoFitEnabled] = useState(false)
+  const isAutoFitEnabledRef = useRef(false)
 
   const optionsRef = useRef(options)
   optionsRef.current = options
@@ -168,21 +197,53 @@ export function useImageEditor(options: UseImageEditorOptions | null) {
 
   // 設定縮放
   const setScale = useCallback((scale: number) => {
-    setState((prev) => ({
-      ...prev,
-      scale: Math.max(1, Math.min(5, scale)),
-    }))
+    setState((prev) => {
+      let newScale = Math.max(1, Math.min(5, scale))
+      if (isAutoFitEnabledRef.current) {
+        const dims = naturalDimensionsRef.current
+        if (dims) {
+          const minScale = calculateAutoFitScale(prev.rotate, dims.width, dims.height)
+          newScale = Math.max(newScale, minScale)
+        }
+      }
+      return { ...prev, scale: newScale }
+    })
   }, [])
 
   // 設定旋轉 (-180 ~ 180)
   const setRotate = useCallback((rotate: number) => {
     const clamped = Math.max(-180, Math.min(180, rotate))
-    setState((prev) => ({ ...prev, rotate: clamped }))
+    setState((prev) => {
+      if (isAutoFitEnabledRef.current) {
+        const dims = naturalDimensionsRef.current
+        if (dims) {
+          const minScale = calculateAutoFitScale(clamped, dims.width, dims.height)
+          return { ...prev, rotate: clamped, scale: Math.max(1, minScale) }
+        }
+      }
+      return { ...prev, rotate: clamped }
+    })
   }, [])
 
   // 設定圖片位置
   const setImagePosition = useCallback((x: number, y: number) => {
     setState((prev) => ({ ...prev, imageX: x, imageY: y }))
+  }, [])
+
+  // 設定自動貼合
+  const setAutoFitEnabled = useCallback((enabled: boolean) => {
+    isAutoFitEnabledRef.current = enabled
+    _setIsAutoFitEnabled(enabled)
+    if (enabled) {
+      setState((prev) => {
+        const dims = naturalDimensionsRef.current
+        if (dims) {
+          const minScale = calculateAutoFitScale(prev.rotate, dims.width, dims.height)
+          return { ...prev, scale: Math.max(1, minScale) }
+        }
+        return prev
+      })
+    }
   }, [])
 
   // 用於邊界檢查的 imageInfo ref
@@ -438,10 +499,12 @@ export function useImageEditor(options: UseImageEditorOptions | null) {
     imageInfo,
     imageTransform,
     initialized: initializedRef.current,
+    isAutoFitEnabled,
     initialize,
     setScale,
     setRotate,
     setImagePosition,
+    setAutoFitEnabled,
     rotateBy90,
     toggleFlipX,
     toggleFlipY,
