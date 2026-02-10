@@ -127,85 +127,65 @@ function calculateAutoFitScale(
 }
 
 /**
- * 計算圖片回彈位置 — 確保裁切框完全在圖片實際像素範圍內
+ * 計算圖片回彈位置 — 確保圖片完全覆蓋容器範圍（無黑邊）
  *
  * 演算法：
- *   1. 將裁切框四角轉換到圖片的旋轉座標系
- *   2. 在旋轉座標系中計算所需修正量 (du, dv)
- *   3. 將修正量轉回螢幕座標，套用到 imageX/imageY
+ *   1. 計算旋轉後圖片的軸對齊邊界框 (AABB)
+ *   2. 比較 AABB 四邊與容器四邊
+ *   3. 若某邊超出容器內側，將 imageX/imageY 修正回貼齊
  *
- * 若裁切框尺寸大於圖片（某軸），則居中對齊該軸。
+ * 若圖片 AABB 小於容器（某軸），則居中對齊該軸。
  */
 function computeSnapBack(
   state: EditorState,
   imageInfo: ImageInfo
 ): { imageX: number; imageY: number } | null {
-  const { imageX, imageY, scale, rotate, baseRotate, cropX, cropY, cropW, cropH } = state
+  const { imageX, imageY, scale, rotate, baseRotate } = state
   const { naturalWidth, naturalHeight, displayMultiplier: M, containerWidth, containerHeight } = imageInfo
 
-  const imgW = naturalWidth * M
-  const imgH = naturalHeight * M
-  const hw = imgW * scale / 2
-  const hh = imgH * scale / 2
+  const imgW = naturalWidth * M * scale
+  const imgH = naturalHeight * M * scale
 
-  const totalRotate = (baseRotate + rotate) * Math.PI / 180
-  const cosT = Math.cos(totalRotate)
-  const sinT = Math.sin(totalRotate)
+  const totalRotateRad = (baseRotate + rotate) * Math.PI / 180
+  const cosT = Math.abs(Math.cos(totalRotateRad))
+  const sinT = Math.abs(Math.sin(totalRotateRad))
 
+  // 旋轉後的軸對齊邊界框 (AABB)
+  const boundingW = imgW * cosT + imgH * sinT
+  const boundingH = imgW * sinT + imgH * cosT
+
+  // 圖片視覺中心 = 容器中心 + 偏移
   const imgCenterX = containerWidth / 2 + imageX
   const imgCenterY = containerHeight / 2 + imageY
 
-  // 裁切框四角在圖片旋轉座標系的投影
-  const corners: [number, number][] = [
-    [cropX, cropY],
-    [cropX + cropW, cropY],
-    [cropX, cropY + cropH],
-    [cropX + cropW, cropY + cropH],
-  ]
+  // 視覺邊界
+  const visualLeft = imgCenterX - boundingW / 2
+  const visualRight = imgCenterX + boundingW / 2
+  const visualTop = imgCenterY - boundingH / 2
+  const visualBottom = imgCenterY + boundingH / 2
 
-  let minU = Infinity, maxU = -Infinity
-  let minV = Infinity, maxV = -Infinity
+  let newImageX = imageX
+  let newImageY = imageY
 
-  for (const [cx, cy] of corners) {
-    const dx = cx - imgCenterX
-    const dy = cy - imgCenterY
-    const u = dx * cosT + dy * sinT
-    const v = -dx * sinT + dy * cosT
-    minU = Math.min(minU, u)
-    maxU = Math.max(maxU, u)
-    minV = Math.min(minV, v)
-    maxV = Math.max(maxV, v)
-  }
-
-  // 在旋轉座標系中計算修正量
-  let du = 0, dv = 0
-
-  if (maxU - minU <= 2 * hw) {
-    // 裁切框寬度 <= 圖片寬度：推回邊界內
-    if (minU < -hw) du = -hw - minU
-    else if (maxU > hw) du = hw - maxU
+  // 水平回彈
+  if (boundingW >= containerWidth) {
+    if (visualLeft > 0) newImageX = imageX - visualLeft
+    else if (visualRight < containerWidth) newImageX = imageX + (containerWidth - visualRight)
   } else {
-    // 裁切框寬度 > 圖片寬度：居中
-    du = -(minU + maxU) / 2
+    newImageX = 0
   }
 
-  if (maxV - minV <= 2 * hh) {
-    if (minV < -hh) dv = -hh - minV
-    else if (maxV > hh) dv = hh - maxV
+  // 垂直回彈
+  if (boundingH >= containerHeight) {
+    if (visualTop > 0) newImageY = imageY - visualTop
+    else if (visualBottom < containerHeight) newImageY = imageY + (containerHeight - visualBottom)
   } else {
-    dv = -(minV + maxV) / 2
+    newImageY = 0
   }
 
-  if (Math.abs(du) < 0.5 && Math.abs(dv) < 0.5) return null
+  if (Math.abs(newImageX - imageX) < 0.5 && Math.abs(newImageY - imageY) < 0.5) return null
 
-  // 旋轉座標 → 螢幕座標
-  const adjX = -du * cosT + dv * sinT
-  const adjY = -du * sinT - dv * cosT
-
-  return {
-    imageX: imageX + adjX,
-    imageY: imageY + adjY,
-  }
+  return { imageX: newImageX, imageY: newImageY }
 }
 
 export function useImageEditor(options: UseImageEditorOptions | null) {
