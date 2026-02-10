@@ -1,4 +1,5 @@
 import { useState, useCallback, useMemo, useRef } from 'react'
+import { CONTAINER_MIN_WIDTH, CONTAINER_MAX_WIDTH, CONTAINER_MIN_HEIGHT, CONTAINER_MAX_HEIGHT } from '../constants'
 
 /**
  * 編輯器狀態 (符合 V7 規格)
@@ -29,11 +30,11 @@ export interface ImageInfo {
   containerHeight: number    // 容器高度 = effH * M
 }
 
-/** 容器尺寸限制 (px) - 符合 IMAGE_CROPPER_SPEC V7 */
-const MIN_CONTAINER_WIDTH = 400
-const MAX_CONTAINER_WIDTH = 600
-const MIN_CONTAINER_HEIGHT = 300
-const MAX_CONTAINER_HEIGHT = 500
+/** 容器尺寸限制 — 從 constants.ts 匯入 */
+const MIN_CONTAINER_WIDTH = CONTAINER_MIN_WIDTH
+const MAX_CONTAINER_WIDTH = CONTAINER_MAX_WIDTH
+const MIN_CONTAINER_HEIGHT = CONTAINER_MIN_HEIGHT
+const MAX_CONTAINER_HEIGHT = CONTAINER_MAX_HEIGHT
 
 interface UseImageEditorOptions {
   minCropSize?: number

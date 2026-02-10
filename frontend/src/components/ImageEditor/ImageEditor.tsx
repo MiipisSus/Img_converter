@@ -17,6 +17,11 @@ interface ImageEditorProps {
     flipX: () => void
     flipY: () => void
   } | null>
+  /** 縮放/旋轉控制回調 (由外部 sidebar 控制) */
+  onEditorControlRef?: React.MutableRefObject<{
+    setScale: (s: number) => void
+    setRotate: (r: number) => void
+  } | null>
 }
 
 type ResizeHandle = 'nw' | 'ne' | 'sw' | 'se' | 'n' | 's' | 'e' | 'w'
@@ -25,8 +30,9 @@ export function ImageEditor({
   src,
   onStateChange,
   initialState,
-  showControls = true,
+  showControls = false,
   onRotateFlipRef,
+  onEditorControlRef,
 }: ImageEditorProps) {
   const imageRef = useRef<HTMLImageElement>(null)
   const [imageLoaded, setImageLoaded] = useState(false)
@@ -71,6 +77,18 @@ export function ImageEditor({
       }
     }
   }, [onRotateFlipRef, rotateBy90, toggleFlipX, toggleFlipY])
+
+  // 暴露縮放/旋轉控制給外部 sidebar
+  useEffect(() => {
+    if (onEditorControlRef) {
+      onEditorControlRef.current = { setScale, setRotate }
+    }
+    return () => {
+      if (onEditorControlRef) {
+        onEditorControlRef.current = null
+      }
+    }
+  }, [onEditorControlRef, setScale, setRotate])
 
   // 圖片載入 - 初始化編輯器
   const handleImageLoad = useCallback(() => {
@@ -187,7 +205,7 @@ export function ImageEditor({
     >
       {/* 容器 - V6: 尺寸 = 原始尺寸 * displayMultiplier，保持原始比例 */}
       <div
-        className="relative overflow-hidden bg-black select-none flex-shrink-0"
+        className="relative overflow-hidden select-none flex-shrink-0 rounded-lg"
         style={{
           width: containerWidth,
           height: containerHeight,
@@ -209,6 +227,7 @@ export function ImageEditor({
             backgroundSize: '20px 20px',
             backgroundPosition: '0 0, 0 10px, 10px -10px, -10px 0px',
             backgroundColor: '#808080',
+            opacity: 0.5,
           }}
         />
 
@@ -244,20 +263,21 @@ export function ImageEditor({
               <div className="absolute bg-black/50" style={{ top: cropY, left: cropX + cropW, right: 0, height: cropH }} />
             </div>
 
-            {/* Layer 3: 裁切框 */}
+            {/* Layer 3: 裁切框 — highlight color */}
             <div
-              className="absolute border-2 border-white"
+              className="absolute border-2"
               style={{
                 left: cropX,
                 top: cropY,
                 width: cropW,
                 height: cropH,
+                borderColor: '#D4FF3F',
               }}
             >
               {/* 九宮格 */}
               <div className="absolute inset-0 grid grid-cols-3 grid-rows-3 pointer-events-none">
                 {[...Array(9)].map((_, i) => (
-                  <div key={i} className="border border-white/30" />
+                  <div key={i} className="border" style={{ borderColor: 'rgba(212, 255, 63, 0.3)' }} />
                 ))}
               </div>
 
@@ -265,13 +285,15 @@ export function ImageEditor({
               {(['nw', 'ne', 'sw', 'se'] as const).map((handle) => (
                 <div
                   key={handle}
-                  className="absolute w-4 h-4 bg-white border border-gray-400"
+                  className="absolute w-4 h-4"
                   style={{
                     top: handle.includes('n') ? -8 : 'auto',
                     bottom: handle.includes('s') ? -8 : 'auto',
                     left: handle.includes('w') ? -8 : 'auto',
                     right: handle.includes('e') ? -8 : 'auto',
                     cursor: handle === 'nw' || handle === 'se' ? 'nwse-resize' : 'nesw-resize',
+                    backgroundColor: '#D4FF3F',
+                    borderRadius: 2,
                   }}
                   onMouseDown={handleResizeMouseDown(handle)}
                 />
@@ -281,8 +303,10 @@ export function ImageEditor({
               {(['n', 's', 'e', 'w'] as const).map((handle) => (
                 <div
                   key={handle}
-                  className="absolute bg-white"
+                  className="absolute"
                   style={{
+                    backgroundColor: '#D4FF3F',
+                    borderRadius: 3,
                     ...(handle === 'n' && { top: -3, left: '50%', transform: 'translateX(-50%)', width: 30, height: 6, cursor: 'ns-resize' }),
                     ...(handle === 's' && { bottom: -3, left: '50%', transform: 'translateX(-50%)', width: 30, height: 6, cursor: 'ns-resize' }),
                     ...(handle === 'w' && { left: -3, top: '50%', transform: 'translateY(-50%)', width: 6, height: 30, cursor: 'ew-resize' }),
@@ -296,7 +320,7 @@ export function ImageEditor({
         )}
       </div>
 
-      {/* 控制面板 - 獨立於圖片容器 */}
+      {/* 控制面板 (僅在 showControls=true 時顯示，新版由 sidebar 控制) */}
       {showControls && imageInfo && (
         <div className="flex flex-col gap-3 p-3 bg-white rounded shadow">
           {/* Scale 滑桿 */}
@@ -311,13 +335,7 @@ export function ImageEditor({
               onChange={(e) => setScale(parseFloat(e.target.value))}
               className="flex-1"
             />
-            <SliderEditableNumber
-              value={Math.round(scale * 100)}
-              min={100}
-              max={300}
-              suffix="%"
-              onChange={(v) => setScale(v / 100)}
-            />
+            <span className="w-12 text-sm text-right">{Math.round(scale * 100)}%</span>
           </div>
 
           {/* Rotate 滑桿 */}
@@ -332,15 +350,8 @@ export function ImageEditor({
               onChange={(e) => setRotate(parseFloat(e.target.value))}
               className="flex-1"
             />
-            <SliderEditableNumber
-              value={Math.round(rotate)}
-              min={-180}
-              max={180}
-              suffix="°"
-              onChange={(v) => setRotate(v)}
-            />
+            <span className="w-12 text-sm text-right">{Math.round(rotate)}°</span>
           </div>
-
         </div>
       )}
 
@@ -357,68 +368,5 @@ export function ImageEditor({
         </div>
       )}
     </div>
-  )
-}
-
-/** 滑桿旁的可點擊編輯數字 */
-function SliderEditableNumber({
-  value,
-  min,
-  max,
-  suffix = '',
-  onChange,
-}: {
-  value: number
-  min: number
-  max: number
-  suffix?: string
-  onChange: (value: number) => void
-}) {
-  const [editing, setEditing] = useState(false)
-  const [inputValue, setInputValue] = useState(String(value))
-
-  const commit = () => {
-    setEditing(false)
-    const num = parseInt(inputValue)
-    if (!isNaN(num) && num >= min && num <= max) {
-      onChange(num)
-    } else {
-      setInputValue(String(value))
-    }
-  }
-
-  if (editing) {
-    return (
-      <input
-        type="number"
-        min={min}
-        max={max}
-        value={inputValue}
-        onChange={(e) => setInputValue(e.target.value)}
-        onBlur={commit}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter') commit()
-          if (e.key === 'Escape') {
-            setInputValue(String(value))
-            setEditing(false)
-          }
-        }}
-        autoFocus
-        className="w-14 px-1 py-0 text-sm text-right border border-blue-400 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
-      />
-    )
-  }
-
-  return (
-    <span
-      onClick={() => {
-        setInputValue(String(value))
-        setEditing(true)
-      }}
-      className="w-12 text-sm text-right cursor-pointer hover:text-blue-600 hover:underline"
-      title="點擊輸入數值"
-    >
-      {value}{suffix}
-    </span>
   )
 }

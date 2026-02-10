@@ -1,3 +1,72 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* Custom range slider */
+input[type="range"].slider-dark {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 6px;
+  background: #747474;
+  border-radius: 3px;
+  outline: none;
+}
+
+input[type="range"].slider-dark::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  background: #d4ff3f;
+  border-radius: 50%;
+  cursor: pointer;
+  border: none;
+  box-shadow: 0 0 4px rgba(0, 0, 0, 0.3);
+}
+
+input[type="range"].slider-dark::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  background: #d4ff3f;
+  border-radius: 50%;
+  cursor: pointer;
+  border: none;
+  box-shadow: 0 0 4px rgba(0, 0, 0, 0.3);
+}
+
+/* Sidebar scrollbar */
+.sidebar-scroll::-webkit-scrollbar {
+  width: 4px;
+}
+
+.sidebar-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.sidebar-scroll::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 2px;
+}
+
+.sidebar-scroll::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.35);
+}
+
+/* Highlight glow on hover */
+.btn-highlight:hover {
+  box-shadow: 0 0 14px rgba(212, 255, 63, 0.45);
+}
+
+/* Number input in dark theme */
+input[type="number"].input-dark {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: #fff;
+  border-radius: 8px;
+}
+
+input[type="number"].input-dark:focus {
+  border-color: #d4ff3f;
+  outline: none;
+  box-shadow: 0 0 0 1px #d4ff3f;
+}
