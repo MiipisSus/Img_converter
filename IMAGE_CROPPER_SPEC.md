@@ -12,17 +12,37 @@
 
     動態顯示倍率 (displayMultiplier, M)：
 
-        MIN_WIDTH = 400, MAX_WIDTH = 600。
+    限制常數：
 
-        計算邏輯：
+        MIN_WIDTH = 400, MAX_WIDTH = 600
 
-            若 effW > MAX_WIDTH：M=MAX_WIDTH/effW。
+        MIN_HEIGHT = 300, MAX_HEIGHT = 500
 
-            若 effW < MIN_WIDTH：M=MIN_WIDTH/effW。
+    計算邏輯：
 
-            其他：M=1。
+        計算寬度需求倍率 Mw​：
 
-        容器 CSS 尺寸 = (effW∗M,effH∗M)。
+            若 effW > MAX_WIDTH：Mw​=MAX_WIDTH/effW
+
+            若 effW < MIN_WIDTH：Mw​=MIN_WIDTH/effW
+
+            其他：Mw​=1
+
+        計算高度需求倍率 Mh​：
+
+            若 effH > MAX_HEIGHT：Mh​=MAX_HEIGHT/effH
+
+            若 effH < MIN_HEIGHT：Mh​=MIN_HEIGHT/effH
+
+            其他：Mh​=1
+
+        最終倍率判定：
+
+            縮小模式 (若任一維度 > MAX)：M=Math.min(Mw​,Mh​)
+
+            放大模式 (若任一維度 < MIN)：M=Math.max(Mw​,Mh​)
+
+            其餘情況：M=1
 
     背景設計：
 

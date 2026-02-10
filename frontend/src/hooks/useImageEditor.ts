@@ -29,9 +29,11 @@ export interface ImageInfo {
   containerHeight: number    // 容器高度 = effH * M
 }
 
-/** 容器寬度限制 (px) - 符合 IMAGE_CROPPER_SPEC V7 */
+/** 容器尺寸限制 (px) - 符合 IMAGE_CROPPER_SPEC V7 */
 const MIN_CONTAINER_WIDTH = 400
 const MAX_CONTAINER_WIDTH = 600
+const MIN_CONTAINER_HEIGHT = 300
+const MAX_CONTAINER_HEIGHT = 500
 
 interface UseImageEditorOptions {
   minCropSize?: number
@@ -55,28 +57,47 @@ const DEFAULT_STATE: EditorState = {
 
 /**
  * 根據 baseRotate 計算有效尺寸 (V7 規格)
- * 當 baseRotate 為 90 或 270 時，寬高互換
+ * 當 baseRotate 為 ±90 或 ±270 時，寬高互換
  */
 function getEffectiveDimensions(
   naturalWidth: number,
   naturalHeight: number,
   baseRotate: number
 ): { effW: number; effH: number } {
-  if (baseRotate === 90 || baseRotate === 270) {
+  const isLeaning = Math.abs(baseRotate % 180) === 90
+  if (isLeaning) {
     return { effW: naturalHeight, effH: naturalWidth }
   }
   return { effW: naturalWidth, effH: naturalHeight }
 }
 
 /**
- * 根據有效寬度計算 displayMultiplier (V7 規格)
+ * 雙向限制計算 displayMultiplier (V7 規格)
+ *
+ * 分別計算寬高需求倍率 Mw/Mh，再依模式取值：
+ *   縮小模式 (任一維度 > MAX): M = min(Mw, Mh) — 確保完全納入
+ *   放大模式 (任一維度 < MIN): M = max(Mw, Mh) — 確保操作空間
+ *   其餘: M = 1
  */
-function calculateDisplayMultiplier(effW: number): number {
-  if (effW > MAX_CONTAINER_WIDTH) {
-    return MAX_CONTAINER_WIDTH / effW
-  } else if (effW < MIN_CONTAINER_WIDTH) {
-    return MIN_CONTAINER_WIDTH / effW
-  }
+function calculateDisplayMultiplier(effW: number, effH: number): number {
+  // 寬度需求倍率
+  let Mw: number
+  if (effW > MAX_CONTAINER_WIDTH) Mw = MAX_CONTAINER_WIDTH / effW
+  else if (effW < MIN_CONTAINER_WIDTH) Mw = MIN_CONTAINER_WIDTH / effW
+  else Mw = 1
+
+  // 高度需求倍率
+  let Mh: number
+  if (effH > MAX_CONTAINER_HEIGHT) Mh = MAX_CONTAINER_HEIGHT / effH
+  else if (effH < MIN_CONTAINER_HEIGHT) Mh = MIN_CONTAINER_HEIGHT / effH
+  else Mh = 1
+
+  // 模式判定
+  const needsShrink = effW > MAX_CONTAINER_WIDTH || effH > MAX_CONTAINER_HEIGHT
+  const needsEnlarge = effW < MIN_CONTAINER_WIDTH || effH < MIN_CONTAINER_HEIGHT
+
+  if (needsShrink) return Math.min(Mw, Mh)
+  if (needsEnlarge) return Math.max(Mw, Mh)
   return 1
 }
 
@@ -107,7 +128,7 @@ export function useImageEditor(options: UseImageEditorOptions | null) {
       const { effW, effH } = getEffectiveDimensions(naturalWidth, naturalHeight, baseRotate)
 
       // 計算顯示倍率 M
-      const displayMultiplier = calculateDisplayMultiplier(effW)
+      const displayMultiplier = calculateDisplayMultiplier(effW, effH)
 
       // 容器尺寸 = 有效尺寸 * M
       const containerWidth = Math.round(effW * displayMultiplier)
@@ -186,7 +207,7 @@ export function useImageEditor(options: UseImageEditorOptions | null) {
 
       // 計算新的有效尺寸和容器尺寸
       const { effW, effH } = getEffectiveDimensions(dims.width, dims.height, newBaseRotate)
-      const newM = calculateDisplayMultiplier(effW)
+      const newM = calculateDisplayMultiplier(effW, effH)
       const newContainerW = Math.round(effW * newM)
       const newContainerH = Math.round(effH * newM)
 

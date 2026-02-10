@@ -32,11 +32,11 @@ export interface CropResult {
  * Canvas 變換鏈 (複製 CSS 視覺結果):
  *   1. scale(1/M)               — display 像素 → canvas 像素
  *   2. translate(-cropX, -cropY) — 裁切框偏移 (canvas 視窗 = 裁切框區域)
- *   3. translate(center + offset) — 圖片中心在 display 座標的位置
+ *   3. translate(center + offset) — 圖片中心在 display 座標的位置 (= 容器中心 + imageXY)
  *   4. scale(flip * zoom)        — 翻轉 + 使用者縮放
  *   5. rotate(totalRotate)       — 旋轉 (baseRotate + freeRotate)
- *   6. translate(-center)        — 以圖片中心為旋轉原點
- *   7. drawImage(0, 0, cW, cH)  — 繪製拉伸至容器尺寸的圖片
+ *   6. translate(-imgW/2, -imgH/2) — 回到圖片左上角 (imgW = naturalWidth*M)
+ *   7. drawImage(0, 0, imgW, imgH) — 繪製圖片 (維持原始比例)
  *
  * 翻轉像素映射 (Mirror Mapping) 由步驟 4 的 scale(-1) 自然實現:
  *   flipY 時: 畫面上方裁切框取得的是翻轉後位於上方的像素 (即原圖底部)
@@ -66,7 +66,7 @@ export async function generateCroppedImage(
     cropW,
     cropH,
   } = state
-  const { displayMultiplier, containerWidth, containerHeight } = imageInfo
+  const { naturalWidth, naturalHeight, displayMultiplier, containerWidth, containerHeight } = imageInfo
 
   const M = displayMultiplier
 
@@ -87,13 +87,17 @@ export async function generateCroppedImage(
   const flipScaleY = (flipY ? -1 : 1) * scale
   const totalRotate = baseRotate + rotate
 
+  // 圖片顯示尺寸 = 原始尺寸 * M (不隨 baseRotate 對調)
+  const imgDisplayW = naturalWidth * M
+  const imgDisplayH = naturalHeight * M
+
   // 步驟 1: display → canvas 像素
   ctx.scale(1 / M, 1 / M)
 
   // 步驟 2: 裁切框偏移 (canvas 視窗對齊裁切框左上角)
   ctx.translate(-cropX, -cropY)
 
-  // 步驟 3: 移至圖片中心 (T(center) · translate(offset))
+  // 步驟 3: 移至圖片中心 (容器中心 + 偏移，flex 置中保證圖片中心 = 容器中心)
   ctx.translate(containerWidth / 2 + imageX, containerHeight / 2 + imageY)
 
   // 步驟 4: 翻轉 + 使用者縮放
@@ -102,11 +106,11 @@ export async function generateCroppedImage(
   // 步驟 5: 旋轉
   ctx.rotate((totalRotate * Math.PI) / 180)
 
-  // 步驟 6: 回到圖片左上角 (T(-center))
-  ctx.translate(-containerWidth / 2, -containerHeight / 2)
+  // 步驟 6: 回到圖片左上角 (以圖片顯示尺寸為基準)
+  ctx.translate(-imgDisplayW / 2, -imgDisplayH / 2)
 
-  // 3. 繪製圖片 (拉伸至容器尺寸，與 CSS img 元素完全一致)
-  ctx.drawImage(image, 0, 0, containerWidth, containerHeight)
+  // 3. 繪製圖片 (維持原始比例，與 CSS img 元素完全一致)
+  ctx.drawImage(image, 0, 0, imgDisplayW, imgDisplayH)
 
   // 7. 調整尺寸 (如果有指定目標尺寸)
   let finalCanvas: HTMLCanvasElement = canvas

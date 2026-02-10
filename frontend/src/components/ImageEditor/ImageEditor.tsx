@@ -204,7 +204,7 @@ export function ImageEditor({
           }}
         />
 
-        {/* Layer 1: 圖片層 - V6: 圖片填滿容器 */}
+        {/* Layer 1: 圖片層 - 圖片維持原始比例 (naturalWidth*M × naturalHeight*M) */}
         <div className="absolute inset-0 flex items-center justify-center">
           <img
             ref={imageRef}
@@ -214,10 +214,11 @@ export function ImageEditor({
             draggable={false}
             className="max-w-none pointer-events-none"
             style={{
-              // V6: 圖片尺寸 = 容器尺寸 (填滿)
-              width: containerWidth,
-              height: containerHeight,
-              // V6 規格: transform-origin 必須是 center center
+              // 圖片 CSS 尺寸 = 原始尺寸 * M (不隨 baseRotate 對調)
+              // 旋轉由 CSS transform 處理，容器 overflow:hidden 裁剪邊界
+              width: imageInfo ? imageInfo.naturalWidth * imageInfo.displayMultiplier : containerWidth,
+              height: imageInfo ? imageInfo.naturalHeight * imageInfo.displayMultiplier : containerHeight,
+              // transform-origin 必須是 center center
               transform: imageTransform,
               transformOrigin: 'center center',
               willChange: 'transform',
