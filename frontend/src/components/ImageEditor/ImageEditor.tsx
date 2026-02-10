@@ -292,7 +292,13 @@ export function ImageEditor({
               onChange={(e) => setScale(parseFloat(e.target.value))}
               className="flex-1"
             />
-            <span className="w-12 text-sm text-right">{(scale * 100).toFixed(0)}%</span>
+            <SliderEditableNumber
+              value={Math.round(scale * 100)}
+              min={100}
+              max={300}
+              suffix="%"
+              onChange={(v) => setScale(v / 100)}
+            />
           </div>
 
           {/* Rotate 滑桿 */}
@@ -307,7 +313,13 @@ export function ImageEditor({
               onChange={(e) => setRotate(parseFloat(e.target.value))}
               className="flex-1"
             />
-            <span className="w-12 text-sm text-right">{rotate.toFixed(0)}°</span>
+            <SliderEditableNumber
+              value={Math.round(rotate)}
+              min={-180}
+              max={180}
+              suffix="°"
+              onChange={(v) => setRotate(v)}
+            />
           </div>
         </div>
       )}
@@ -325,5 +337,68 @@ export function ImageEditor({
         </div>
       )}
     </div>
+  )
+}
+
+/** 滑桿旁的可點擊編輯數字 */
+function SliderEditableNumber({
+  value,
+  min,
+  max,
+  suffix = '',
+  onChange,
+}: {
+  value: number
+  min: number
+  max: number
+  suffix?: string
+  onChange: (value: number) => void
+}) {
+  const [editing, setEditing] = useState(false)
+  const [inputValue, setInputValue] = useState(String(value))
+
+  const commit = () => {
+    setEditing(false)
+    const num = parseInt(inputValue)
+    if (!isNaN(num) && num >= min && num <= max) {
+      onChange(num)
+    } else {
+      setInputValue(String(value))
+    }
+  }
+
+  if (editing) {
+    return (
+      <input
+        type="number"
+        min={min}
+        max={max}
+        value={inputValue}
+        onChange={(e) => setInputValue(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') commit()
+          if (e.key === 'Escape') {
+            setInputValue(String(value))
+            setEditing(false)
+          }
+        }}
+        autoFocus
+        className="w-14 px-1 py-0 text-sm text-right border border-blue-400 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
+      />
+    )
+  }
+
+  return (
+    <span
+      onClick={() => {
+        setInputValue(String(value))
+        setEditing(true)
+      }}
+      className="w-12 text-sm text-right cursor-pointer hover:text-blue-600 hover:underline"
+      title="點擊輸入數值"
+    >
+      {value}{suffix}
+    </span>
   )
 }

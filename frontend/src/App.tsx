@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useEffect } from 'react'
+import { useState, useCallback, useRef } from 'react'
 import { ImageEditor } from './components/ImageEditor'
 import { generateCroppedImage, type CropResult } from './utils/generateCroppedImage'
 import type { EditorState, ImageInfo } from './hooks/useImageEditor'
