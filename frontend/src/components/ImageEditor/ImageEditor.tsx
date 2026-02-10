@@ -32,7 +32,6 @@ export function ImageEditor({
   const [imageLoaded, setImageLoaded] = useState(false)
 
   // 拖動狀態
-  const [isDragging, setIsDragging] = useState(false)
   const [isResizing, setIsResizing] = useState<ResizeHandle | null>(null)
   const [isDraggingImage, setIsDraggingImage] = useState(false)
   const dragStartRef = useRef({ x: 0, y: 0, cropX: 0, cropY: 0, cropW: 0, cropH: 0, imageX: 0, imageY: 0 })
@@ -44,16 +43,14 @@ export function ImageEditor({
     state,
     imageInfo,
     imageTransform,
-    isAutoFitEnabled,
     initialize,
     setScale,
     setRotate,
     setImagePosition,
-    setAutoFitEnabled,
+    snapImageToCropBox,
     rotateBy90,
     toggleFlipX,
     toggleFlipY,
-    moveCropBox,
     resizeCropBox,
     setCropBox,
   } = editor
@@ -89,25 +86,6 @@ export function ImageEditor({
     onStateChange?.(state, imageInfo)
   }, [state, imageInfo, onStateChange])
 
-  // --- 裁切框拖動 ---
-  const handleCropBoxMouseDown = useCallback(
-    (e: React.MouseEvent) => {
-      e.stopPropagation()
-      setIsDragging(true)
-      dragStartRef.current = {
-        x: e.clientX,
-        y: e.clientY,
-        cropX: state.cropX,
-        cropY: state.cropY,
-        cropW: state.cropW,
-        cropH: state.cropH,
-        imageX: 0,
-        imageY: 0,
-      }
-    },
-    [state.cropX, state.cropY, state.cropW, state.cropH]
-  )
-
   // --- 調整大小 ---
   const handleResizeMouseDown = useCallback(
     (handle: ResizeHandle) => (e: React.MouseEvent) => {
@@ -127,10 +105,10 @@ export function ImageEditor({
     [state.cropX, state.cropY, state.cropW, state.cropH]
   )
 
-  // --- 拖動圖片 (scale > 1 時，點擊裁切框外) ---
+  // --- 拖動圖片 (框定型：非控制點區域皆為圖片拖動) ---
   const handleContainerMouseDown = useCallback(
     (e: React.MouseEvent) => {
-      if (state.scale <= 1) return
+      if (state.scale <= 1 && state.rotate === 0) return
       setIsDraggingImage(true)
       dragStartRef.current = {
         x: e.clientX,
@@ -143,7 +121,7 @@ export function ImageEditor({
         imageY: state.imageY,
       }
     },
-    [state.scale, state.imageX, state.imageY]
+    [state.scale, state.rotate, state.imageX, state.imageY]
   )
 
   // --- 全域滑鼠事件 ---
@@ -152,13 +130,7 @@ export function ImageEditor({
       const deltaX = e.clientX - dragStartRef.current.x
       const deltaY = e.clientY - dragStartRef.current.y
 
-      if (isDragging) {
-        setCropBox({
-          cropX: dragStartRef.current.cropX + deltaX,
-          cropY: dragStartRef.current.cropY + deltaY,
-        })
-        moveCropBox(0, 0)
-      } else if (isResizing) {
+      if (isResizing) {
         setCropBox({
           cropX: dragStartRef.current.cropX,
           cropY: dragStartRef.current.cropY,
@@ -175,12 +147,13 @@ export function ImageEditor({
     }
 
     const handleMouseUp = () => {
-      setIsDragging(false)
       setIsResizing(null)
       setIsDraggingImage(false)
+      // 邊界回彈：確保裁切框在圖片範圍內
+      snapImageToCropBox()
     }
 
-    if (isDragging || isResizing || isDraggingImage) {
+    if (isResizing || isDraggingImage) {
       window.addEventListener('mousemove', handleMouseMove)
       window.addEventListener('mouseup', handleMouseUp)
       return () => {
@@ -188,7 +161,7 @@ export function ImageEditor({
         window.removeEventListener('mouseup', handleMouseUp)
       }
     }
-  }, [isDragging, isResizing, isDraggingImage, setCropBox, moveCropBox, resizeCropBox, setImagePosition])
+  }, [isResizing, isDraggingImage, setCropBox, resizeCropBox, setImagePosition, snapImageToCropBox])
 
   // --- 滾輪縮放 ---
   const handleWheel = useCallback(
@@ -218,7 +191,7 @@ export function ImageEditor({
         style={{
           width: containerWidth,
           height: containerHeight,
-          cursor: isDraggingImage ? 'grabbing' : scale > 1 ? 'grab' : 'default',
+          cursor: isDraggingImage ? 'grabbing' : (scale > 1 || Math.abs(rotate) > 0) ? 'grab' : 'default',
         }}
         onWheel={handleWheel}
         onMouseDown={handleContainerMouseDown}
@@ -279,9 +252,7 @@ export function ImageEditor({
                 top: cropY,
                 width: cropW,
                 height: cropH,
-                cursor: isDragging ? 'grabbing' : 'move',
               }}
-              onMouseDown={handleCropBoxMouseDown}
             >
               {/* 九宮格 */}
               <div className="absolute inset-0 grid grid-cols-3 grid-rows-3 pointer-events-none">
@@ -370,26 +341,6 @@ export function ImageEditor({
             />
           </div>
 
-          {/* 自動貼合開關 */}
-          <div className="flex items-center gap-3">
-            <span className="w-16" />
-            <button
-              type="button"
-              role="switch"
-              aria-checked={isAutoFitEnabled}
-              onClick={() => setAutoFitEnabled(!isAutoFitEnabled)}
-              className={`relative inline-flex h-5 w-9 flex-shrink-0 items-center rounded-full transition-colors ${
-                isAutoFitEnabled ? 'bg-blue-500' : 'bg-gray-300'
-              }`}
-            >
-              <span
-                className={`inline-block h-3.5 w-3.5 rounded-full bg-white shadow-sm transition-transform ${
-                  isAutoFitEnabled ? 'translate-x-[18px]' : 'translate-x-[2px]'
-                }`}
-              />
-            </button>
-            <span className="text-sm text-gray-500">旋轉時自動貼合</span>
-          </div>
         </div>
       )}
 

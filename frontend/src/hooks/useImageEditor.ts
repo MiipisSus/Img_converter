@@ -126,6 +126,88 @@ function calculateAutoFitScale(
   return Math.max(s1, s2)
 }
 
+/**
+ * 計算圖片回彈位置 — 確保裁切框完全在圖片實際像素範圍內
+ *
+ * 演算法：
+ *   1. 將裁切框四角轉換到圖片的旋轉座標系
+ *   2. 在旋轉座標系中計算所需修正量 (du, dv)
+ *   3. 將修正量轉回螢幕座標，套用到 imageX/imageY
+ *
+ * 若裁切框尺寸大於圖片（某軸），則居中對齊該軸。
+ */
+function computeSnapBack(
+  state: EditorState,
+  imageInfo: ImageInfo
+): { imageX: number; imageY: number } | null {
+  const { imageX, imageY, scale, rotate, baseRotate, cropX, cropY, cropW, cropH } = state
+  const { naturalWidth, naturalHeight, displayMultiplier: M, containerWidth, containerHeight } = imageInfo
+
+  const imgW = naturalWidth * M
+  const imgH = naturalHeight * M
+  const hw = imgW * scale / 2
+  const hh = imgH * scale / 2
+
+  const totalRotate = (baseRotate + rotate) * Math.PI / 180
+  const cosT = Math.cos(totalRotate)
+  const sinT = Math.sin(totalRotate)
+
+  const imgCenterX = containerWidth / 2 + imageX
+  const imgCenterY = containerHeight / 2 + imageY
+
+  // 裁切框四角在圖片旋轉座標系的投影
+  const corners: [number, number][] = [
+    [cropX, cropY],
+    [cropX + cropW, cropY],
+    [cropX, cropY + cropH],
+    [cropX + cropW, cropY + cropH],
+  ]
+
+  let minU = Infinity, maxU = -Infinity
+  let minV = Infinity, maxV = -Infinity
+
+  for (const [cx, cy] of corners) {
+    const dx = cx - imgCenterX
+    const dy = cy - imgCenterY
+    const u = dx * cosT + dy * sinT
+    const v = -dx * sinT + dy * cosT
+    minU = Math.min(minU, u)
+    maxU = Math.max(maxU, u)
+    minV = Math.min(minV, v)
+    maxV = Math.max(maxV, v)
+  }
+
+  // 在旋轉座標系中計算修正量
+  let du = 0, dv = 0
+
+  if (maxU - minU <= 2 * hw) {
+    // 裁切框寬度 <= 圖片寬度：推回邊界內
+    if (minU < -hw) du = -hw - minU
+    else if (maxU > hw) du = hw - maxU
+  } else {
+    // 裁切框寬度 > 圖片寬度：居中
+    du = -(minU + maxU) / 2
+  }
+
+  if (maxV - minV <= 2 * hh) {
+    if (minV < -hh) dv = -hh - minV
+    else if (maxV > hh) dv = hh - maxV
+  } else {
+    dv = -(minV + maxV) / 2
+  }
+
+  if (Math.abs(du) < 0.5 && Math.abs(dv) < 0.5) return null
+
+  // 旋轉座標 → 螢幕座標
+  const adjX = -du * cosT + dv * sinT
+  const adjY = -du * sinT - dv * cosT
+
+  return {
+    imageX: imageX + adjX,
+    imageY: imageY + adjY,
+  }
+}
+
 export function useImageEditor(options: UseImageEditorOptions | null) {
   const [state, setState] = useState<EditorState>(DEFAULT_STATE)
   const [imageInfo, setImageInfo] = useState<ImageInfo | null>(null)
@@ -133,10 +215,6 @@ export function useImageEditor(options: UseImageEditorOptions | null) {
 
   // 保存原始圖片尺寸供 90° 旋轉重算使用
   const naturalDimensionsRef = useRef<{ width: number; height: number } | null>(null)
-
-  // 自動貼合旋轉
-  const [isAutoFitEnabled, _setIsAutoFitEnabled] = useState(false)
-  const isAutoFitEnabledRef = useRef(false)
 
   const optionsRef = useRef(options)
   optionsRef.current = options
@@ -195,31 +273,27 @@ export function useImageEditor(options: UseImageEditorOptions | null) {
     [initialStateOption]
   )
 
-  // 設定縮放
+  // 設定縮放 (強制自動貼合：不允許低於旋轉所需最小倍率)
   const setScale = useCallback((scale: number) => {
     setState((prev) => {
       let newScale = Math.max(1, Math.min(5, scale))
-      if (isAutoFitEnabledRef.current) {
-        const dims = naturalDimensionsRef.current
-        if (dims) {
-          const minScale = calculateAutoFitScale(prev.rotate, dims.width, dims.height)
-          newScale = Math.max(newScale, minScale)
-        }
+      const dims = naturalDimensionsRef.current
+      if (dims) {
+        const minScale = calculateAutoFitScale(prev.rotate, dims.width, dims.height)
+        newScale = Math.max(newScale, minScale)
       }
       return { ...prev, scale: newScale }
     })
   }, [])
 
-  // 設定旋轉 (-180 ~ 180)
+  // 設定旋轉 (-180 ~ 180, 強制自動貼合)
   const setRotate = useCallback((rotate: number) => {
     const clamped = Math.max(-180, Math.min(180, rotate))
     setState((prev) => {
-      if (isAutoFitEnabledRef.current) {
-        const dims = naturalDimensionsRef.current
-        if (dims) {
-          const minScale = calculateAutoFitScale(clamped, dims.width, dims.height)
-          return { ...prev, rotate: clamped, scale: Math.max(1, minScale) }
-        }
+      const dims = naturalDimensionsRef.current
+      if (dims) {
+        const minScale = calculateAutoFitScale(clamped, dims.width, dims.height)
+        return { ...prev, rotate: clamped, scale: Math.max(1, minScale) }
       }
       return { ...prev, rotate: clamped }
     })
@@ -228,22 +302,6 @@ export function useImageEditor(options: UseImageEditorOptions | null) {
   // 設定圖片位置
   const setImagePosition = useCallback((x: number, y: number) => {
     setState((prev) => ({ ...prev, imageX: x, imageY: y }))
-  }, [])
-
-  // 設定自動貼合
-  const setAutoFitEnabled = useCallback((enabled: boolean) => {
-    isAutoFitEnabledRef.current = enabled
-    _setIsAutoFitEnabled(enabled)
-    if (enabled) {
-      setState((prev) => {
-        const dims = naturalDimensionsRef.current
-        if (dims) {
-          const minScale = calculateAutoFitScale(prev.rotate, dims.width, dims.height)
-          return { ...prev, scale: Math.max(1, minScale) }
-        }
-        return prev
-      })
-    }
   }, [])
 
   // 用於邊界檢查的 imageInfo ref
@@ -474,6 +532,17 @@ export function useImageEditor(options: UseImageEditorOptions | null) {
     []
   )
 
+  // 邊界回彈：確保裁切框在圖片範圍內
+  const snapImageToCropBox = useCallback(() => {
+    const info = imageInfoRef.current
+    if (!info) return
+    setState((prev) => {
+      const result = computeSnapBack(prev, info)
+      if (!result) return prev
+      return { ...prev, imageX: result.imageX, imageY: result.imageY }
+    })
+  }, [])
+
   /**
    * CSS Transform (統一變換順序)
    * 順序: translate → scale(flip) → rotate(totalAngle)
@@ -499,12 +568,11 @@ export function useImageEditor(options: UseImageEditorOptions | null) {
     imageInfo,
     imageTransform,
     initialized: initializedRef.current,
-    isAutoFitEnabled,
     initialize,
     setScale,
     setRotate,
     setImagePosition,
-    setAutoFitEnabled,
+    snapImageToCropBox,
     rotateBy90,
     toggleFlipX,
     toggleFlipY,
