@@ -215,17 +215,37 @@ export function useImageEditor(options: UseImageEditorOptions | null) {
       const containerWidth = Math.round(effW * displayMultiplier)
       const containerHeight = Math.round(effH * displayMultiplier)
 
-      setImageInfo({
+      const info: ImageInfo = {
         naturalWidth,
         naturalHeight,
         displayMultiplier,
         containerWidth,
         containerHeight,
-      })
+      }
+      setImageInfo(info)
 
-      // 如果有初始狀態，使用它；否則裁切框完全貼合容器
       if (initialStateOption) {
-        setState(initialStateOption)
+        // 恢復初始狀態，但必須驗證並校正各數值
+        let restored = { ...initialStateOption }
+
+        // 1. 強制自動貼合：確保 scale >= 旋轉所需最小倍率
+        const minScale = getRequiredScale(restored.rotate, naturalWidth, naturalHeight)
+        restored.scale = Math.max(1, Math.min(5, Math.max(restored.scale, minScale)))
+
+        // 2. 裁切框限制在容器範圍內
+        restored.cropW = Math.max(50, Math.min(containerWidth, restored.cropW))
+        restored.cropH = Math.max(50, Math.min(containerHeight, restored.cropH))
+        restored.cropX = Math.max(0, Math.min(containerWidth - restored.cropW, restored.cropX))
+        restored.cropY = Math.max(0, Math.min(containerHeight - restored.cropH, restored.cropY))
+
+        // 3. 校正圖片位移（確保覆蓋容器）
+        const clamped = clampImagePosition(restored, info)
+        if (clamped) {
+          restored.imageX = clamped.imageX
+          restored.imageY = clamped.imageY
+        }
+
+        setState(restored)
       } else {
         setState({
           imageX: 0,
