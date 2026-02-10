@@ -44,6 +44,7 @@ export function ImageEditor({
   // 拖動狀態
   const [isResizing, setIsResizing] = useState<ResizeHandle | null>(null);
   const [isDraggingImage, setIsDraggingImage] = useState(false);
+  const [isSnappingBack, setIsSnappingBack] = useState(false);
   const dragStartRef = useRef({
     x: 0,
     y: 0,
@@ -180,7 +181,8 @@ export function ImageEditor({
     const handleMouseUp = () => {
       setIsResizing(null);
       setIsDraggingImage(false);
-      // 邊界回彈：確保裁切框在圖片範圍內
+      // 啟用回彈動畫，然後修正位置
+      setIsSnappingBack(true);
       clampImage();
     };
 
@@ -200,6 +202,14 @@ export function ImageEditor({
     setImagePosition,
     clampImage,
   ]);
+
+  // 回彈動畫結束後重置 (fallback timeout 防止 transitionEnd 未觸發)
+  useEffect(() => {
+    if (isSnappingBack) {
+      const timer = setTimeout(() => setIsSnappingBack(false), 250);
+      return () => clearTimeout(timer);
+    }
+  }, [isSnappingBack]);
 
   // --- 滾輪縮放 ---
   const handleWheel = useCallback(
@@ -272,6 +282,7 @@ export function ImageEditor({
                   : containerHeight,
                 transform: imageTransform,
                 transformOrigin: "center center",
+                transition: isSnappingBack ? "transform 200ms ease-out" : "none",
                 willChange: "transform",
               }}
             />
