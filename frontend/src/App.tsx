@@ -1360,17 +1360,28 @@ function CropControlPanel({
       {/* 比例按鈕 */}
       <div className="bg-white/10 rounded-[10px] p-3">
         <p className="text-xs text-white/70 font-medium mb-2">裁切比例</p>
-        <div className="grid grid-cols-3 gap-1.5">
-          {ratios.map(({ label, w, h }) => (
-            <button
-              key={label}
-              onClick={() => onSetCropRatio(w, h)}
-              className="px-2 py-1.5 text-xs font-medium rounded-md border transition-colors
-                border-highlight/40 text-highlight hover:bg-highlight/20 hover:border-highlight"
-            >
-              {label}
-            </button>
-          ))}
+        <div className="grid grid-cols-3 gap-2">
+          {ratios.map(({ label, w, h }) => {
+            // 在 24×24 容器內依比例縮放矩形
+            const maxDim = 24;
+            const iconW = w >= h ? maxDim : Math.round(maxDim * (w / h));
+            const iconH = h >= w ? maxDim : Math.round(maxDim * (h / w));
+            return (
+              <button
+                key={label}
+                onClick={() => onSetCropRatio(w, h)}
+                className="flex flex-col items-center justify-center gap-1.5 rounded-lg border border-white/10 bg-white/5 transition-all
+                  hover:bg-highlight/15 hover:border-highlight/60 active:scale-95"
+                style={{ aspectRatio: "1 / 1" }}
+              >
+                <div
+                  className="border border-highlight/70 rounded-[2px]"
+                  style={{ width: iconW, height: iconH }}
+                />
+                <span className="text-[10px] font-medium text-white/80">{label}</span>
+              </button>
+            );
+          })}
         </div>
       </div>
 
