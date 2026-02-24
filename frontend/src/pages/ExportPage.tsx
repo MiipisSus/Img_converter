@@ -631,7 +631,7 @@ function OutputSettingsPanel({
         <button
           onClick={onApply}
           disabled={isExporting}
-          className="w-full px-4 py-3 bg-highlight text-black font-bold rounded-[10px] transition-all btn-highlight disabled:opacity-30"
+          className="w-full px-4 py-2 bg-highlight text-black font-bold rounded-[10px] transition-all btn-highlight disabled:opacity-30"
         >
           {isExporting ? "處理中..." : "套用並預覽"}
         </button>
@@ -639,7 +639,7 @@ function OutputSettingsPanel({
           <button
             onClick={handleDownload}
             disabled={isPdfExporting}
-            className="w-full px-4 py-2 text-center text-sm text-white/80 hover:text-white border border-white/20 rounded-[10px] transition-colors disabled:opacity-30"
+            className="w-full px-4 py-2 text-center text-white/80 hover:text-white border border-white/20 rounded-[10px] transition-colors disabled:opacity-30"
           >
             {isPdfExporting
               ? "匯出中..."
