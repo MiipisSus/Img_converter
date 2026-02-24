@@ -363,10 +363,11 @@ function OutputSettingsPanel({
   const [widthError, setWidthError] = useState(false);
   const [heightError, setHeightError] = useState(false);
 
-  const [isPdfExporting, setIsPdfExporting] = useState(false);
+  const [isBatchExporting, setIsBatchExporting] = useState(false);
   const [downloadFormat, setDownloadFormat] = useState<"image" | "pdf">("image");
 
   const { baseWidth, baseHeight, lockAspectRatio, format } = settings;
+  const isMultiImage = images.length > 1;
 
   // 同步外部 settings 變更到 input (切換圖片時)
   useEffect(() => {
@@ -374,15 +375,60 @@ function OutputSettingsPanel({
     setHeightInput(String(settings.targetHeight));
   }, [settings.targetWidth, settings.targetHeight]);
 
-  // 下載處理 (圖片 or PDF)
+  // 下載處理
   const handleDownload = async () => {
+    if (isBatchExporting) return;
+
+    // 單圖 + 圖片格式：直接下載
+    if (!isMultiImage && downloadFormat === "image") {
+      if (!previewUrl) return;
+      const a = document.createElement("a");
+      a.href = previewUrl;
+      a.download = `processed-image.${format}`;
+      a.click();
+      return;
+    }
+
+    // 多圖 + 圖片格式：ZIP 壓縮下載
+    if (isMultiImage && downloadFormat === "image") {
+      const blobs: { blob: Blob; ext: string; index: number }[] = [];
+      images.forEach((img, i) => {
+        if (img.pipelineState.previewBlob) {
+          blobs.push({ blob: img.pipelineState.previewBlob, ext: img.exportFormat ?? format, index: i });
+        }
+      });
+      if (blobs.length === 0) return;
+
+      setIsBatchExporting(true);
+      try {
+        const JSZip = (await import("jszip")).default;
+        const zip = new JSZip();
+        for (const { blob, ext, index } of blobs) {
+          zip.file(`image-${index + 1}.${ext}`, blob);
+        }
+        const zipBlob = await zip.generateAsync({ type: "blob" });
+        const url = URL.createObjectURL(zipBlob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = "images.zip";
+        a.click();
+        URL.revokeObjectURL(url);
+      } catch (err) {
+        console.error("ZIP 匯出失敗:", err);
+      } finally {
+        setIsBatchExporting(false);
+      }
+      return;
+    }
+
+    // PDF 格式：收集所有圖片 blob 匯出 PDF
     if (downloadFormat === "pdf") {
       const allBlobs = images
         .map((img) => img.pipelineState.previewBlob)
         .filter((b): b is Blob => b !== null);
-      if (allBlobs.length === 0 || isPdfExporting) return;
+      if (allBlobs.length === 0) return;
 
-      setIsPdfExporting(true);
+      setIsBatchExporting(true);
       try {
         const { exportPdf } = await import("../api/exportPdf");
         const pdfBlob = await exportPdf(allBlobs, "export.pdf");
@@ -395,14 +441,8 @@ function OutputSettingsPanel({
       } catch (err) {
         console.error("PDF 匯出失敗:", err);
       } finally {
-        setIsPdfExporting(false);
+        setIsBatchExporting(false);
       }
-    } else {
-      if (!previewUrl) return;
-      const a = document.createElement("a");
-      a.href = previewUrl;
-      a.download = `processed-image.${format}`;
-      a.click();
     }
   };
 
@@ -735,10 +775,10 @@ function OutputSettingsPanel({
         {(previewUrl || previewBlob) && (
           <button
             onClick={handleDownload}
-            disabled={isPdfExporting}
+            disabled={isBatchExporting}
             className="w-full px-4 py-2 text-center text-white/80 hover:text-white border border-white/20 rounded-[10px] transition-colors disabled:opacity-30"
           >
-            {isPdfExporting
+            {isBatchExporting
               ? "匯出中..."
               : downloadFormat === "pdf"
                 ? "下載 PDF"
