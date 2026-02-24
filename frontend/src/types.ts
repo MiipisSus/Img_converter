@@ -26,6 +26,16 @@ export interface PipelineState {
   outputHeight: number;
 }
 
+/** 多圖管理的單一圖片項目 */
+export interface ImageItem {
+  id: string;
+  src: string;
+  imgElement: HTMLImageElement;
+  pipelineState: PipelineState;
+  /** 累積視覺旋轉角度 (不取模，用於 CSS 平滑動畫避免 270°→0° 反向插值) */
+  visualBaseRotate: number;
+}
+
 /** 輸出設定狀態 (暫態，返回裁切時會重置) */
 export interface OutputSettings {
   targetWidth: number;

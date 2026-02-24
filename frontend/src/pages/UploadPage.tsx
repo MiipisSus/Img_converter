@@ -1,92 +1,109 @@
 import { useState, useCallback, useRef } from "react";
-import type { PipelineState } from "../types";
+import type { PipelineState, ImageItem } from "../types";
 import { calculateContainerParams, getCroppedOriginalSize } from "../utils/containerParams";
 
 interface UploadPageProps {
-  onImageLoaded: (
-    src: string,
-    img: HTMLImageElement,
-    initialPipeline: PipelineState,
-  ) => void;
+  onImagesLoaded: (images: ImageItem[]) => void;
 }
 
-export function UploadPage({ onImageLoaded }: UploadPageProps) {
+/** 將單一 File 轉為 ImageItem (含 pipeline 初始化) */
+function loadImageFile(file: File): Promise<ImageItem> {
+  return new Promise((resolve, reject) => {
+    if (!file.type.startsWith("image/")) {
+      reject(new Error("不是圖片檔案"));
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onerror = () => reject(reader.error);
+    reader.onload = (event) => {
+      const src = event.target?.result as string;
+
+      const img = new Image();
+      img.src = src;
+      img.onload = () => {
+        const { M, containerWidth, containerHeight } =
+          calculateContainerParams(img.naturalWidth, img.naturalHeight, 0);
+
+        const initialState = {
+          imageX: 0,
+          imageY: 0,
+          scale: 1,
+          rotate: 0,
+          baseRotate: 0,
+          flipX: false,
+          flipY: false,
+          cropX: 0,
+          cropY: 0,
+          cropW: containerWidth,
+          cropH: containerHeight,
+        };
+
+        const initialImageInfo = {
+          naturalWidth: img.naturalWidth,
+          naturalHeight: img.naturalHeight,
+          displayMultiplier: M,
+          containerWidth,
+          containerHeight,
+        };
+
+        const croppedSize = getCroppedOriginalSize(initialState, initialImageInfo);
+
+        const initialPipeline: PipelineState = {
+          editorState: initialState,
+          imageInfo: initialImageInfo,
+          previewUrl: null,
+          previewBlob: null,
+          resize: {
+            active: false,
+            targetWidth: croppedSize.width,
+            targetHeight: croppedSize.height,
+            lockAspectRatio: true,
+            croppedWidth: croppedSize.width,
+            croppedHeight: croppedSize.height,
+          },
+          outputWidth: croppedSize.width,
+          outputHeight: croppedSize.height,
+        };
+
+        resolve({
+          id: crypto.randomUUID(),
+          src,
+          imgElement: img,
+          pipelineState: initialPipeline,
+          visualBaseRotate: 0,
+        });
+      };
+      img.onerror = () => reject(new Error("圖片載入失敗"));
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+export function UploadPage({ onImagesLoaded }: UploadPageProps) {
   const [isDragOver, setIsDragOver] = useState(false);
   const dragCounterRef = useRef(0);
 
-  // 共用：處理圖片檔案
-  const processFile = useCallback(
-    (file: File) => {
-      if (!file.type.startsWith("image/")) return;
+  // 處理多個檔案
+  const processFiles = useCallback(
+    async (files: FileList) => {
+      const imageFiles = Array.from(files).filter((f) =>
+        f.type.startsWith("image/"),
+      );
+      if (imageFiles.length === 0) return;
 
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        const src = event.target?.result as string;
-
-        const img = new Image();
-        img.src = src;
-        img.onload = () => {
-          const { M, containerWidth, containerHeight } =
-            calculateContainerParams(img.naturalWidth, img.naturalHeight, 0);
-
-          const initialState = {
-            imageX: 0,
-            imageY: 0,
-            scale: 1,
-            rotate: 0,
-            baseRotate: 0,
-            flipX: false,
-            flipY: false,
-            cropX: 0,
-            cropY: 0,
-            cropW: containerWidth,
-            cropH: containerHeight,
-          };
-
-          const initialImageInfo = {
-            naturalWidth: img.naturalWidth,
-            naturalHeight: img.naturalHeight,
-            displayMultiplier: M,
-            containerWidth,
-            containerHeight,
-          };
-
-          const croppedSize = getCroppedOriginalSize(
-            initialState,
-            initialImageInfo,
-          );
-
-          const initialPipeline: PipelineState = {
-            editorState: initialState,
-            imageInfo: initialImageInfo,
-            previewUrl: null,
-            previewBlob: null,
-            resize: {
-              active: false,
-              targetWidth: croppedSize.width,
-              targetHeight: croppedSize.height,
-              lockAspectRatio: true,
-              croppedWidth: croppedSize.width,
-              croppedHeight: croppedSize.height,
-            },
-            outputWidth: croppedSize.width,
-            outputHeight: croppedSize.height,
-          };
-
-          onImageLoaded(src, img, initialPipeline);
-        };
-      };
-      reader.readAsDataURL(file);
+      const items = await Promise.all(imageFiles.map(loadImageFile));
+      onImagesLoaded(items);
     },
-    [onImageLoaded],
+    [onImagesLoaded],
   );
 
   const handleFileChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
-      const file = e.target.files?.[0];
-      if (file) processFile(file);
+      const files = e.target.files;
+      if (files && files.length > 0) processFiles(files);
     },
-    [processFile],
+    [processFiles],
   );
 
   const handleDragEnter = useCallback((e: React.DragEvent) => {
@@ -119,10 +136,10 @@ export function UploadPage({ onImageLoaded }: UploadPageProps) {
       setIsDragOver(false);
       dragCounterRef.current = 0;
 
-      const file = e.dataTransfer.files?.[0];
-      if (file) processFile(file);
+      const files = e.dataTransfer.files;
+      if (files && files.length > 0) processFiles(files);
     },
-    [processFile],
+    [processFiles],
   );
 
   return (
@@ -167,13 +184,14 @@ export function UploadPage({ onImageLoaded }: UploadPageProps) {
             <div className="px-8 py-3 bg-highlight text-black font-bold rounded-[10px] transition-all btn-highlight hover:brightness-110 text-lg">
               選擇圖片
             </div>
-            <p className="text-sm text-gray-500">支援 JPG, PNG, WebP 等格式</p>
+            <p className="text-sm text-gray-500">支援 JPG, PNG, WebP 等格式（可多選）</p>
           </div>
         </label>
         <input
           id="image-upload"
           type="file"
           accept="image/*"
+          multiple
           onChange={handleFileChange}
           className="hidden"
         />

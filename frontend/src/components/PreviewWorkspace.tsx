@@ -1,5 +1,4 @@
 import type { EditorState, ImageInfo } from "../hooks/useImageEditor";
-import { calculatePreviewMultiplier } from "../utils/containerParams";
 
 type AppMode = "preview" | "crop" | "output";
 
@@ -14,6 +13,8 @@ export function PreviewWorkspace({
   outputWidth,
   outputHeight,
   visualBaseRotate,
+  maxPreviewWidth,
+  maxPreviewHeight,
 }: {
   editorState: EditorState | null;
   imageInfo: ImageInfo | null;
@@ -25,6 +26,10 @@ export function PreviewWorkspace({
   outputHeight: number;
   /** 累積旋轉角度 (不取模，避免 CSS 反向插值) */
   visualBaseRotate: number;
+  /** 預覽容器最大寬度 (來自 ResizeObserver) */
+  maxPreviewWidth: number;
+  /** 預覽容器最大高度 (來自 ResizeObserver) */
+  maxPreviewHeight: number;
 }) {
   const hasCropResult = previewUrl !== null;
 
@@ -47,8 +52,8 @@ export function PreviewWorkspace({
     const cropPxW = cropW / M;
     const cropPxH = cropH / M;
 
-    // 預覽顯示倍率
-    const PM = calculatePreviewMultiplier(cropPxW, cropPxH);
+    // 預覽顯示倍率 — 受限於容器實際尺寸 × 0.95 呼吸空間，不放大超過原始像素
+    const PM = Math.min(maxPreviewWidth * 0.95 / cropPxW, maxPreviewHeight * 0.95 / cropPxH, 1);
     const displayW = Math.round(cropPxW * PM);
     const displayH = Math.round(cropPxH * PM);
 
@@ -68,13 +73,15 @@ export function PreviewWorkspace({
     const dur = "0.4s";
 
     return (
-      <div className="flex flex-col items-center gap-3 relative">
+      <div className="flex flex-col items-center justify-center relative" style={{ maxWidth: "100%", maxHeight: "100%" }}>
         {/* 外層容器：裁切視窗，overflow:hidden 實現裁切效果 */}
         <div
           className="relative rounded-lg overflow-hidden"
           style={{
             width: displayW,
             height: displayH,
+            maxWidth: "100%",
+            maxHeight: "100%",
             transition: `width ${dur} ${easing}, height ${dur} ${easing}`,
           }}
         >
@@ -105,23 +112,23 @@ export function PreviewWorkspace({
           </div>
         </div>
 
-        {!hasCropResult && (
+        {/* {!hasCropResult && (
           <span className="mt-1 text-sm text-gray-400 cursor-not-allowed">
             使用左側工具進行編輯
           </span>
-        )}
+        )} */}
       </div>
     );
   }
 
   // ── 點陣圖預覽 (output 模式或無編輯狀態) ──
   const displayUrl = previewUrl ?? originalSrc;
-  const M_out = calculatePreviewMultiplier(outputWidth, outputHeight);
+  const M_out = Math.min(maxPreviewWidth * 0.95 / outputWidth, maxPreviewHeight * 0.95 / outputHeight, 1);
   const displayWidth = Math.round(outputWidth * M_out);
   const displayHeight = Math.round(outputHeight * M_out);
 
   return (
-    <div className="flex flex-col items-center gap-3 relative">
+    <div className="flex flex-col items-center justify-center relative" style={{ maxWidth: "100%", maxHeight: "100%" }}>
       {isProcessing && (
         <div className="absolute inset-0 bg-preview/70 flex items-center justify-center z-10 rounded-lg">
           <p className="text-gray-500">處理中...</p>
@@ -142,6 +149,8 @@ export function PreviewWorkspace({
           backgroundColor: "#d8d8d8",
           width: displayWidth,
           height: displayHeight,
+          maxWidth: "100%",
+          maxHeight: "100%",
         }}
       >
         <img

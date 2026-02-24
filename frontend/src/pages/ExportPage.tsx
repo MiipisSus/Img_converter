@@ -1,14 +1,14 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useRef, useLayoutEffect } from "react";
 import { PreviewWorkspace } from "../components/PreviewWorkspace";
 import { DarkEditableNumber } from "../components/DarkEditableNumber";
 import { generateCroppedImage } from "../utils/generateCroppedImage";
 import { getCroppedOriginalSize } from "../utils/containerParams";
-import type { PipelineState, OutputSettings } from "../types";
+import type { PipelineState, OutputSettings, ImageItem } from "../types";
 
 interface ExportPageProps {
-  imageSrc: string;
+  images: ImageItem[];
+  activeImageId: string;
   imageRef: React.MutableRefObject<HTMLImageElement | null>;
-  pipelineState: PipelineState;
   setPipelineState: React.Dispatch<
     React.SetStateAction<PipelineState | null>
   >;
@@ -16,13 +16,45 @@ interface ExportPageProps {
 }
 
 export function ExportPage({
-  imageSrc,
+  images,
+  activeImageId,
   imageRef,
-  pipelineState,
   setPipelineState,
   onReturn,
 }: ExportPageProps) {
   const [isExporting, setIsExporting] = useState(false);
+
+  // ── 預覽區域容器尺寸追蹤 ──
+  const previewContainerRef = useRef<HTMLDivElement>(null);
+  const [viewportSize, setViewportSize] = useState({ width: 800, height: 600 });
+
+  useLayoutEffect(() => {
+    const el = previewContainerRef.current;
+    if (!el) return;
+    const { offsetWidth, offsetHeight } = el;
+    if (offsetWidth > 0 && offsetHeight > 0) {
+      setViewportSize({ width: offsetWidth, height: offsetHeight });
+    }
+    const ro = new ResizeObserver((entries) => {
+      const entry = entries[0];
+      if (entry) {
+        const { width, height } = entry.contentRect;
+        if (width > 0 && height > 0) {
+          setViewportSize({ width: Math.round(width), height: Math.round(height) });
+        }
+      }
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  // ── 衍生當前圖片資料 ──
+  const activeImage = useMemo(
+    () => images.find((i) => i.id === activeImageId)!,
+    [images, activeImageId],
+  );
+  const { pipelineState } = activeImage;
+  const imageSrc = activeImage.src;
 
   // 初始化輸出設定 (進入時計算一次)
   const initialSettings = useMemo<OutputSettings>(() => {
@@ -199,6 +231,7 @@ export function ExportPage({
         {/* 中部: 輸出設定面板 */}
         <div className="flex-1 p-4 pt-2 flex flex-col gap-3">
           <OutputSettingsPanel
+            images={images}
             settings={outputSettings}
             onUpdateSettings={handleUpdateOutputSettings}
             onApply={handleApplyOutput}
@@ -211,7 +244,7 @@ export function ExportPage({
       </aside>
 
       {/* ===== 右側預覽區 ===== */}
-      <main className="flex-1 bg-preview flex items-center justify-center m-4 rounded-lg">
+      <main ref={previewContainerRef} className="flex-1 bg-preview flex items-center justify-center m-4 rounded-lg overflow-hidden">
         <PreviewWorkspace
           editorState={null}
           imageInfo={null}
@@ -222,6 +255,8 @@ export function ExportPage({
           outputWidth={pipelineState.outputWidth}
           outputHeight={pipelineState.outputHeight}
           visualBaseRotate={0}
+          maxPreviewWidth={viewportSize.width}
+          maxPreviewHeight={viewportSize.height}
         />
       </main>
     </div>
@@ -234,6 +269,7 @@ export function ExportPage({
 
 /** 輸出設定面板 (Output mode) */
 function OutputSettingsPanel({
+  images,
   settings,
   onUpdateSettings,
   onApply,
@@ -242,6 +278,7 @@ function OutputSettingsPanel({
   previewUrl,
   previewBlob,
 }: {
+  images: ImageItem[];
   settings: OutputSettings;
   onUpdateSettings: (updates: Partial<OutputSettings>) => void;
   onApply: () => void;
@@ -269,11 +306,16 @@ function OutputSettingsPanel({
   // 下載處理 (圖片 or PDF)
   const handleDownload = async () => {
     if (downloadFormat === "pdf") {
-      if (!previewBlob || isPdfExporting) return;
+      // 批量 PDF：蒐集所有圖片的 previewBlob
+      const allBlobs = images
+        .map((img) => img.pipelineState.previewBlob)
+        .filter((b): b is Blob => b !== null);
+      if (allBlobs.length === 0 || isPdfExporting) return;
+
       setIsPdfExporting(true);
       try {
         const { exportPdf } = await import("../api/exportPdf");
-        const pdfBlob = await exportPdf([previewBlob], "export.pdf");
+        const pdfBlob = await exportPdf(allBlobs, "export.pdf");
         const url = URL.createObjectURL(pdfBlob);
         const a = document.createElement("a");
         a.href = url;

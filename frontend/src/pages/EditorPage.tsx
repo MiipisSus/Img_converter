@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useMemo, useEffect, useLayoutEffect } from "react";
 import { ImageEditor } from "../components/ImageEditor";
 import { PreviewWorkspace } from "../components/PreviewWorkspace";
 import { DarkEditableNumber } from "../components/DarkEditableNumber";
@@ -11,14 +11,16 @@ import {
   getCroppedOriginalSize,
 } from "../utils/containerParams";
 import type { EditorState, ImageInfo } from "../hooks/useImageEditor";
-import type { PipelineState } from "../types";
+import type { PipelineState, ImageItem } from "../types";
 
 type EditorMode = "preview" | "crop";
 
 interface EditorPageProps {
-  imageSrc: string;
+  images: ImageItem[];
+  activeImageId: string;
+  onSelectImage: (id: string) => void;
+  onUpdateImage: (id: string, updates: Partial<ImageItem>) => void;
   imageRef: React.MutableRefObject<HTMLImageElement | null>;
-  pipelineState: PipelineState;
   setPipelineState: React.Dispatch<
     React.SetStateAction<PipelineState | null>
   >;
@@ -27,15 +29,28 @@ interface EditorPageProps {
 }
 
 export function EditorPage({
-  imageSrc,
+  images,
+  activeImageId,
+  onSelectImage,
+  onUpdateImage,
   imageRef,
-  pipelineState,
   setPipelineState,
   onExport,
   onReset,
 }: EditorPageProps) {
   const [mode, setMode] = useState<EditorMode>("preview");
   const [isExporting, setIsExporting] = useState(false);
+
+  // ── 隔離渲染: 從 images + activeImageId 衍生當前圖片資料 ──
+  const currentImageData = useMemo(() => {
+    const img = images.find((i) => i.id === activeImageId);
+    if (!img) return null;
+    return {
+      src: img.src,
+      pipelineState: img.pipelineState,
+      visualBaseRotate: img.visualBaseRotate,
+    };
+  }, [images, activeImageId]);
 
   // 當前編輯中的狀態 (裁切模式用)
   const currentEditorStateRef = useRef<{
@@ -62,6 +77,48 @@ export function EditorPage({
 
   // 累積視覺旋轉角度 (不取模，用於 CSS 平滑動畫避免 270°→0° 反向插值)
   const visualBaseRotateRef = useRef(0);
+
+  // ── 預覽區域容器尺寸追蹤 (ResizeObserver) ──
+  const previewContainerRef = useRef<HTMLDivElement>(null);
+  const [viewportSize, setViewportSize] = useState({ width: 800, height: 600 });
+
+  // ── 切換圖片時：重置模式 + 同步 visualBaseRotate ──
+  // 只在 activeImageId 切換時觸發，不依賴 images（避免 setPipelineState 更新圖片時重置 mode）
+  useEffect(() => {
+    setMode("preview");
+    const active = images.find((i) => i.id === activeImageId);
+    if (active) {
+      visualBaseRotateRef.current = active.visualBaseRotate;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeImageId]);
+
+  // ── 監聽預覽容器大小變化 (useLayoutEffect 確保首幀前就有正確尺寸) ──
+  useLayoutEffect(() => {
+    const el = previewContainerRef.current;
+    if (!el) return;
+    // 立即讀取初始尺寸，避免首次渲染使用預設值
+    const { offsetWidth, offsetHeight } = el;
+    if (offsetWidth > 0 && offsetHeight > 0) {
+      setViewportSize({ width: offsetWidth, height: offsetHeight });
+    }
+    const ro = new ResizeObserver((entries) => {
+      const entry = entries[0];
+      if (entry) {
+        const { width, height } = entry.contentRect;
+        if (width > 0 && height > 0) {
+          setViewportSize({ width: Math.round(width), height: Math.round(height) });
+        }
+      }
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  // 提前 return 必須在所有 hooks 之後
+  if (!currentImageData) return null;
+  const { pipelineState } = currentImageData;
+  const imageSrc = currentImageData.src;
 
   // 接收編輯器狀態更新
   const handleStateChange = useCallback(
@@ -398,6 +455,9 @@ export function EditorPage({
   const handleRotate = useCallback(
     (direction: "left" | "right") => {
       visualBaseRotateRef.current += direction === "right" ? 90 : -90;
+      onUpdateImage(activeImageId, {
+        visualBaseRotate: visualBaseRotateRef.current,
+      });
       applyTransformAndGenerate((prevState, oldInfo) => {
         const oldM = oldInfo.displayMultiplier;
         const S = prevState.scale;
@@ -572,7 +632,7 @@ export function EditorPage({
         return { newState, newInfo };
       }, true);
     },
-    [applyTransformAndGenerate],
+    [applyTransformAndGenerate, activeImageId, onUpdateImage],
   );
 
   // 翻轉
@@ -720,27 +780,55 @@ export function EditorPage({
       </aside>
 
       {/* ===== 右側預覽區 ===== */}
-      <main className="flex-1 bg-preview flex items-center justify-center m-4 rounded-lg">
-        {mode === "preview" ? (
-          <PreviewWorkspace
-            editorState={pipelineState.editorState}
-            imageInfo={pipelineState.imageInfo}
-            originalSrc={imageSrc}
-            previewUrl={pipelineState.previewUrl}
-            isProcessing={isExporting}
-            mode="preview"
-            outputWidth={pipelineState.outputWidth}
-            outputHeight={pipelineState.outputHeight}
-            visualBaseRotate={visualBaseRotateRef.current}
-          />
-        ) : (
-          <ImageEditor
-            src={imageSrc}
-            onStateChange={handleStateChange}
-            initialState={pipelineState.editorState}
-            showControls={false}
-            onEditorControlRef={editorControlRef}
-          />
+      <main className="flex-1 flex flex-col h-screen">
+        {/* 圖片預覽區 — flex-1 佔滿剩餘空間 */}
+        <div ref={previewContainerRef} className="flex-1 bg-preview flex items-center justify-center m-4 mb-0 rounded-lg overflow-hidden">
+          {mode === "preview" ? (
+            <PreviewWorkspace
+              editorState={pipelineState.editorState}
+              imageInfo={pipelineState.imageInfo}
+              originalSrc={imageSrc}
+              previewUrl={pipelineState.previewUrl}
+              isProcessing={isExporting}
+              mode="preview"
+              outputWidth={pipelineState.outputWidth}
+              outputHeight={pipelineState.outputHeight}
+              visualBaseRotate={currentImageData.visualBaseRotate}
+              maxPreviewWidth={viewportSize.width}
+              maxPreviewHeight={viewportSize.height}
+            />
+          ) : (
+            <ImageEditor
+              src={imageSrc}
+              onStateChange={handleStateChange}
+              initialState={pipelineState.editorState}
+              showControls={false}
+              onEditorControlRef={editorControlRef}
+            />
+          )}
+        </div>
+
+        {/* 縮圖列表 — 固定高度，多圖時顯示 */}
+        {images.length > 1 && (
+          <div className="h-[120px] shrink-0 w-full overflow-x-auto thumbnail-scroll px-5 py-2.5 flex items-center gap-3">
+            {images.map((item) => (
+              <button
+                key={item.id}
+                onClick={() => onSelectImage(item.id)}
+                className={`shrink-0 w-16 h-16 rounded-lg overflow-hidden border-2 transition-colors ${
+                  item.id === activeImageId
+                    ? "border-highlight"
+                    : "border-transparent hover:border-white/30"
+                }`}
+              >
+                <img
+                  src={item.pipelineState.previewUrl ?? item.src}
+                  className="w-full h-full object-cover"
+                  alt=""
+                />
+              </button>
+            ))}
+          </div>
         )}
       </main>
     </div>
