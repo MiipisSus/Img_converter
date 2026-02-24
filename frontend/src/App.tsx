@@ -705,70 +705,114 @@ function App() {
     [isExporting, pipelineState],
   );
 
-  // 90° 旋轉
+  // 90° 旋轉 — 全像素路徑轉向
+  //
+  // 核心：保留 imageOffset 旋轉而非歸零，避免 clamp 截斷 cropBox 導致尺寸縮水。
+  //
+  // 流程:
+  //   UI 座標 ──(÷ oldM*S)──▶ 像素座標 ──(旋轉)──▶ 像素座標 ──(× newM*S)──▶ UI 座標
+  //   imageOffset ──(向量旋轉)──▶ newImageOffset
   const handleRotate = useCallback(
     (direction: "left" | "right") => {
       applyTransformAndGenerate((prevState, oldInfo) => {
+        const oldM = oldInfo.displayMultiplier;
+        const S = prevState.scale;
+
+        // ── 1. 旋轉前的有效像素尺寸 ──
+        const oldIsLeaning = Math.abs(prevState.baseRotate % 180) === 90;
+        const oldEffW = oldIsLeaning ? oldInfo.naturalHeight : oldInfo.naturalWidth;
+        const oldEffH = oldIsLeaning ? oldInfo.naturalWidth : oldInfo.naturalHeight;
+
+        // ── Debug: BEFORE ──
+        console.log('[Rotation Debug - BEFORE]', {
+          naturalWidth: oldInfo.naturalWidth,
+          naturalHeight: oldInfo.naturalHeight,
+          baseRotate: prevState.baseRotate,
+          oldEffW, oldEffH, oldM, S,
+          imageOffset: { x: prevState.imageX, y: prevState.imageY },
+          cropBox: { x: prevState.cropX, y: prevState.cropY, w: prevState.cropW, h: prevState.cropH },
+          container: { w: oldInfo.containerWidth, h: oldInfo.containerHeight },
+          exportWouldBe: { w: Math.round(prevState.cropW / oldM), h: Math.round(prevState.cropH / oldM) },
+        });
+
+        // ── 2. 強制重新計算 newM（嚴禁沿用旋轉前的 M）──
         const newBaseRotate =
           direction === "right"
             ? (prevState.baseRotate + 90) % 360
             : (prevState.baseRotate - 90 + 360) % 360;
 
-        const { M, containerWidth, containerHeight } = calculateContainerParams(
+        const {
+          M: newM,
+          effW: newEffW,
+          effH: newEffH,
+          containerWidth: newContainerW,
+          containerHeight: newContainerH,
+        } = calculateContainerParams(
           oldInfo.naturalWidth,
           oldInfo.naturalHeight,
           newBaseRotate,
         );
 
-        const oldRelCropX = prevState.cropX / oldInfo.containerWidth;
-        const oldRelCropY = prevState.cropY / oldInfo.containerHeight;
-        const oldRelCropW = prevState.cropW / oldInfo.containerWidth;
-        const oldRelCropH = prevState.cropH / oldInfo.containerHeight;
-
-        let newRelCropX: number,
-          newRelCropY: number,
-          newRelCropW: number,
-          newRelCropH: number;
-
+        // ── 3. 位移向量旋轉（不歸零）──
+        //    CW  90°: (x, y) → (-y,  x)
+        //    CCW 90°: (x, y) → ( y, -x)
+        let newImageX: number, newImageY: number;
         if (direction === "right") {
-          newRelCropX = 1 - oldRelCropY - oldRelCropH;
-          newRelCropY = oldRelCropX;
-          newRelCropW = oldRelCropH;
-          newRelCropH = oldRelCropW;
+          newImageX = -prevState.imageY;
+          newImageY = prevState.imageX;
         } else {
-          newRelCropX = oldRelCropY;
-          newRelCropY = 1 - oldRelCropX - oldRelCropW;
-          newRelCropW = oldRelCropH;
-          newRelCropH = oldRelCropW;
+          newImageX = prevState.imageY;
+          newImageY = -prevState.imageX;
         }
 
-        const newCropX = Math.round(newRelCropX * containerWidth);
-        const newCropY = Math.round(newRelCropY * containerHeight);
-        const newCropW = Math.round(newRelCropW * containerWidth);
-        const newCropH = Math.round(newRelCropH * containerHeight);
+        // ── 4. cropBox UI 座標 → 像素座標 ──
+        //    圖片視覺左上角 = container*(1-S)/2 + imageOffset
+        const oldVisualLeft = oldInfo.containerWidth * (1 - S) / 2 + prevState.imageX;
+        const oldVisualTop = oldInfo.containerHeight * (1 - S) / 2 + prevState.imageY;
 
-        const clampedCropX = Math.max(
-          0,
-          Math.min(containerWidth - 50, newCropX),
-        );
-        const clampedCropY = Math.max(
-          0,
-          Math.min(containerHeight - 50, newCropY),
-        );
-        const clampedCropW = Math.max(
-          50,
-          Math.min(containerWidth - clampedCropX, newCropW),
-        );
-        const clampedCropH = Math.max(
-          50,
-          Math.min(containerHeight - clampedCropY, newCropH),
-        );
+        const pxX = (prevState.cropX - oldVisualLeft) / (oldM * S);
+        const pxY = (prevState.cropY - oldVisualTop) / (oldM * S);
+        const pxW = prevState.cropW / (oldM * S);
+        const pxH = prevState.cropH / (oldM * S);
 
+        // ── 5. 像素座標 90° 旋轉 ──
+        let newPxX: number, newPxY: number, newPxW: number, newPxH: number;
+
+        if (direction === "right") {
+          // CW 90°: (x, y, w, h) → (effH - y - h, x, h, w)
+          newPxX = oldEffH - pxY - pxH;
+          newPxY = pxX;
+          newPxW = pxH;
+          newPxH = pxW;
+        } else {
+          // CCW 90°: (x, y, w, h) → (y, effW - x - w, h, w)
+          newPxX = pxY;
+          newPxY = oldEffW - pxX - pxW;
+          newPxW = pxH;
+          newPxH = pxW;
+        }
+
+        // ── 6. 像素座標 → 新 UI 座標（使用 newM * S + 旋轉後的 offset）──
+        const newVisualLeft = newContainerW * (1 - S) / 2 + newImageX;
+        const newVisualTop = newContainerH * (1 - S) / 2 + newImageY;
+
+        const rawCropX = newPxX * newM * S + newVisualLeft;
+        const rawCropY = newPxY * newM * S + newVisualTop;
+        const rawCropW = newPxW * newM * S;
+        const rawCropH = newPxH * newM * S;
+
+        // ── 7. Clamp（保護性，正常情況不應截斷）──
+        const clampedCropX = Math.max(0, Math.min(newContainerW - 50, Math.round(rawCropX)));
+        const clampedCropY = Math.max(0, Math.min(newContainerH - 50, Math.round(rawCropY)));
+        const clampedCropW = Math.max(50, Math.min(newContainerW - clampedCropX, Math.round(rawCropW)));
+        const clampedCropH = Math.max(50, Math.min(newContainerH - clampedCropY, Math.round(rawCropH)));
+
+        // ── 8. 組裝新狀態 ──
         const newState: EditorState = {
           ...prevState,
           baseRotate: newBaseRotate,
-          imageX: 0,
-          imageY: 0,
+          imageX: newImageX,
+          imageY: newImageY,
           cropX: clampedCropX,
           cropY: clampedCropY,
           cropW: clampedCropW,
@@ -777,10 +821,26 @@ function App() {
 
         const newInfo: ImageInfo = {
           ...oldInfo,
-          displayMultiplier: M,
-          containerWidth,
-          containerHeight,
+          displayMultiplier: newM,
+          containerWidth: newContainerW,
+          containerHeight: newContainerH,
         };
+
+        // ── Debug: AFTER ──
+        console.log('[Rotation Debug - AFTER]', {
+          direction, newBaseRotate, newEffW, newEffH,
+          oldM, newM, M_changed: oldM !== newM,
+          imageOffset: { x: newImageX, y: newImageY },
+          container: { w: newContainerW, h: newContainerH },
+          pixelCrop: { x: newPxX, y: newPxY, w: newPxW, h: newPxH },
+          rawUiCrop: { x: rawCropX, y: rawCropY, w: rawCropW, h: rawCropH },
+          clampedCrop: { x: clampedCropX, y: clampedCropY, w: clampedCropW, h: clampedCropH },
+          exportWillBe: { w: Math.round(clampedCropW / newM), h: Math.round(clampedCropH / newM) },
+          // 驗證
+          effW_swapped: newEffW === oldEffH,
+          natural_unchanged: newInfo.naturalWidth === oldInfo.naturalWidth && newInfo.naturalHeight === oldInfo.naturalHeight,
+          clamp_didnt_cut: Math.round(rawCropW) === clampedCropW && Math.round(rawCropH) === clampedCropH,
+        });
 
         return { newState, newInfo };
       }, true); // is90Rotation = true

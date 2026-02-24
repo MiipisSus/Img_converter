@@ -20,7 +20,7 @@ from ..schemas.images import (
     ProcessingResultResponse,
     ErrorResponse
 )
-from ...services.image_service import ImageService
+from backend.services.image_service import ImageService
 
 router = APIRouter(prefix="/images", tags=["圖片處理"])
 
