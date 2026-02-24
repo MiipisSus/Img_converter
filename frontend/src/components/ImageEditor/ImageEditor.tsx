@@ -27,6 +27,12 @@ interface ImageEditorProps {
     setRotate: (r: number) => void;
     setCropBox: (crop: { cropX: number; cropY: number; cropW: number; cropH: number }, animated?: boolean) => void;
   } | null>;
+  /** 預覽容器實際寬度 (用於 viewport-aware M 計算) */
+  viewportWidth?: number;
+  /** 預覽容器實際高度 */
+  viewportHeight?: number;
+  /** initialState 座標所基於的 M 值 (用於座標歸一化) */
+  referenceM?: number;
 }
 
 type ResizeHandle = "nw" | "ne" | "sw" | "se" | "n" | "s" | "e" | "w";
@@ -38,6 +44,9 @@ export function ImageEditor({
   showControls = false,
   onRotateFlipRef,
   onEditorControlRef,
+  viewportWidth,
+  viewportHeight,
+  referenceM,
 }: ImageEditorProps) {
   const imageRef = useRef<HTMLImageElement>(null);
   const [imageLoaded, setImageLoaded] = useState(false);
@@ -58,8 +67,8 @@ export function ImageEditor({
     imageY: 0,
   });
 
-  // V5: useImageEditor 不再需要 viewport 尺寸參數
-  const editor = useImageEditor({ initialState });
+  // V8: 傳入 viewport 尺寸供 viewport-aware M 計算
+  const editor = useImageEditor({ initialState, viewportWidth, viewportHeight, referenceM });
 
   const {
     state,

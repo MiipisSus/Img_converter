@@ -64,6 +64,47 @@ export function getCroppedOriginalSize(
   return { width, height };
 }
 
+/**
+ * 統一的 viewport-aware Display Multiplier 計算
+ * M = Math.min(viewW * 0.9 / effW, viewH * 0.9 / effH, 1)
+ * 確保圖片縮放後的視覺尺寸 ≤ 容器的 90%，且永不放大超過原始像素
+ */
+export function calculateViewportM(
+  viewW: number,
+  viewH: number,
+  effW: number,
+  effH: number,
+): number {
+  if (effW <= 0 || effH <= 0 || viewW <= 0 || viewH <= 0) return 1;
+  return Math.min((viewW * 0.9) / effW, (viewH * 0.9) / effH, 1);
+}
+
+/**
+ * 根據實際 viewport 尺寸計算完整容器參數 (effW, effH, M, containerWidth, containerHeight)
+ * 用於 EditorPage handleRotate 及任何需要 viewport-aware 容器尺寸的場景
+ */
+export function calculateViewportContainerParams(
+  naturalWidth: number,
+  naturalHeight: number,
+  baseRotate: number,
+  viewW: number,
+  viewH: number,
+): {
+  effW: number;
+  effH: number;
+  M: number;
+  containerWidth: number;
+  containerHeight: number;
+} {
+  const isLeaning = Math.abs(baseRotate % 180) === 90;
+  const effW = isLeaning ? naturalHeight : naturalWidth;
+  const effH = isLeaning ? naturalWidth : naturalHeight;
+  const M = calculateViewportM(viewW, viewH, effW, effH);
+  const containerWidth = Math.round(effW * M);
+  const containerHeight = Math.round(effH * M);
+  return { effW, effH, M, containerWidth, containerHeight };
+}
+
 /** 計算預覽顯示倍率 - 符合 IMAGE_CROPPER_SPEC V7 (雙向限制) */
 export function calculatePreviewMultiplier(
   width: number,

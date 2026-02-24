@@ -7,7 +7,7 @@ import {
   type CropResult,
 } from "../utils/generateCroppedImage";
 import {
-  calculateContainerParams,
+  calculateViewportContainerParams,
   getCroppedOriginalSize,
 } from "../utils/containerParams";
 import type { EditorState, ImageInfo } from "../hooks/useImageEditor";
@@ -81,6 +81,8 @@ export function EditorPage({
   // ── 預覽區域容器尺寸追蹤 (ResizeObserver) ──
   const previewContainerRef = useRef<HTMLDivElement>(null);
   const [viewportSize, setViewportSize] = useState({ width: 800, height: 600 });
+  const viewportSizeRef = useRef(viewportSize);
+  viewportSizeRef.current = viewportSize;
 
   // ── 切換圖片時：重置模式 + 同步 visualBaseRotate ──
   // 只在 activeImageId 切換時觸發，不依賴 images（避免 setPipelineState 更新圖片時重置 mode）
@@ -293,12 +295,13 @@ export function EditorPage({
     setMode("preview");
   }, []);
 
-  // 裁切比例按鈕
+  // 裁切比例按鈕 — 使用編輯器的即時狀態 (currentEditorStateRef) 而非 pipelineState
+  // 確保在 viewport-aware M 下座標系一致
   const handleSetCropRatio = useCallback(
     (ratioW: number, ratioH: number) => {
-      if (!editorControlRef.current) return;
+      if (!editorControlRef.current || !currentEditorStateRef.current) return;
 
-      const { editorState, imageInfo } = pipelineState;
+      const { state: editorState, imageInfo } = currentEditorStateRef.current;
       const { cropX, cropY, cropW, cropH, scale } = editorState;
       const { displayMultiplier: M } = imageInfo;
 
@@ -358,7 +361,7 @@ export function EditorPage({
         true,
       );
     },
-    [pipelineState],
+    [],
   );
 
   // === 旋轉/翻轉 ===
@@ -500,25 +503,30 @@ export function EditorPage({
             ? (prevState.baseRotate + 90) % 360
             : (prevState.baseRotate - 90 + 360) % 360;
 
+        const { width: viewW, height: viewH } = viewportSizeRef.current;
         const {
           M: newM,
           effW: newEffW,
           effH: newEffH,
           containerWidth: newContainerW,
           containerHeight: newContainerH,
-        } = calculateContainerParams(
+        } = calculateViewportContainerParams(
           oldInfo.naturalWidth,
           oldInfo.naturalHeight,
           newBaseRotate,
+          viewW,
+          viewH,
         );
 
+        // 座標歸一化：oldM → newM 的比例縮放 (旋轉後 effW/effH 互換導致 M 可能改變)
+        const mScaleFactor = newM / oldM;
         let newImageX: number, newImageY: number;
         if (direction === "right") {
-          newImageX = -prevState.imageY;
-          newImageY = prevState.imageX;
+          newImageX = -prevState.imageY * mScaleFactor;
+          newImageY = prevState.imageX * mScaleFactor;
         } else {
-          newImageX = prevState.imageY;
-          newImageY = -prevState.imageX;
+          newImageX = prevState.imageY * mScaleFactor;
+          newImageY = -prevState.imageX * mScaleFactor;
         }
 
         const oldVisualLeft =
@@ -804,6 +812,9 @@ export function EditorPage({
               initialState={pipelineState.editorState}
               showControls={false}
               onEditorControlRef={editorControlRef}
+              viewportWidth={viewportSize.width}
+              viewportHeight={viewportSize.height}
+              referenceM={pipelineState.imageInfo.displayMultiplier}
             />
           )}
         </div>

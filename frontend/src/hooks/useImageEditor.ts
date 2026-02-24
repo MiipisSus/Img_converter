@@ -1,5 +1,6 @@
 import { useState, useCallback, useMemo, useRef } from 'react'
 import { CONTAINER_MIN_WIDTH, CONTAINER_MAX_WIDTH, CONTAINER_MIN_HEIGHT, CONTAINER_MAX_HEIGHT } from '../constants'
+import { calculateViewportM } from '../utils/containerParams'
 
 /**
  * 編輯器狀態 (符合 V7 規格)
@@ -40,6 +41,12 @@ interface UseImageEditorOptions {
   minCropSize?: number
   /** 初始狀態 (用於恢復上次的裁切參數) */
   initialState?: EditorState
+  /** 預覽容器實際寬度 (來自 ResizeObserver，用於 viewport-aware M 計算) */
+  viewportWidth?: number
+  /** 預覽容器實際高度 */
+  viewportHeight?: number
+  /** initialState 座標所基於的 M 值 (用於座標歸一化重縮放) */
+  referenceM?: number
 }
 
 const DEFAULT_STATE: EditorState = {
@@ -197,7 +204,7 @@ export function useImageEditor(options: UseImageEditorOptions | null) {
   const minCropSize = options?.minCropSize ?? 50
   const initialStateOption = options?.initialState
 
-  // 初始化 (V7 規格)
+  // 初始化 (V7 規格 + viewport-aware M)
   const initialize = useCallback(
     (naturalWidth: number, naturalHeight: number) => {
       // 保存原始尺寸
@@ -209,8 +216,12 @@ export function useImageEditor(options: UseImageEditorOptions | null) {
       // 計算有效尺寸
       const { effW, effH } = getEffectiveDimensions(naturalWidth, naturalHeight, baseRotate)
 
-      // 計算顯示倍率 M
-      const displayMultiplier = calculateDisplayMultiplier(effW, effH)
+      // 計算顯示倍率 M — viewport-aware 優先，否則回退到固定常數
+      const vw = optionsRef.current?.viewportWidth
+      const vh = optionsRef.current?.viewportHeight
+      const displayMultiplier = (vw && vh && vw > 0 && vh > 0)
+        ? calculateViewportM(vw, vh, effW, effH)
+        : calculateDisplayMultiplier(effW, effH)
 
       // 容器尺寸 = 有效尺寸 * M
       const containerWidth = Math.round(effW * displayMultiplier)
@@ -228,6 +239,18 @@ export function useImageEditor(options: UseImageEditorOptions | null) {
       if (initialStateOption) {
         // 恢復初始狀態，但必須驗證並校正各數值
         let restored = { ...initialStateOption }
+
+        // 0. 座標歸一化：若 M 與 initialState 基準不同，按比例重縮放所有座標
+        const referenceM = optionsRef.current?.referenceM ?? calculateDisplayMultiplier(effW, effH)
+        const scaleFactor = displayMultiplier / referenceM
+        if (Math.abs(scaleFactor - 1) > 0.001) {
+          restored.cropX *= scaleFactor
+          restored.cropY *= scaleFactor
+          restored.cropW *= scaleFactor
+          restored.cropH *= scaleFactor
+          restored.imageX *= scaleFactor
+          restored.imageY *= scaleFactor
+        }
 
         // 1. 強制自動貼合：確保 scale >= 旋轉所需最小倍率
         const minScale = getRequiredScale(restored.rotate, naturalWidth, naturalHeight)
@@ -320,7 +343,7 @@ export function useImageEditor(options: UseImageEditorOptions | null) {
   }, [])
 
   /**
-   * 90° 旋轉 (重新計算容器尺寸)
+   * 90° 旋轉 (重新計算容器尺寸 — viewport-aware)
    */
   const rotateBy90 = useCallback((direction: 'left' | 'right') => {
     const dims = naturalDimensionsRef.current
@@ -335,9 +358,13 @@ export function useImageEditor(options: UseImageEditorOptions | null) {
         newBaseRotate = (prev.baseRotate - 90 + 360) % 360
       }
 
-      // 計算新的有效尺寸和容器尺寸
+      // 計算新的有效尺寸和容器尺寸 — viewport-aware 優先
       const { effW, effH } = getEffectiveDimensions(dims.width, dims.height, newBaseRotate)
-      const newM = calculateDisplayMultiplier(effW, effH)
+      const vw = optionsRef.current?.viewportWidth
+      const vh = optionsRef.current?.viewportHeight
+      const newM = (vw && vh && vw > 0 && vh > 0)
+        ? calculateViewportM(vw, vh, effW, effH)
+        : calculateDisplayMultiplier(effW, effH)
       const newContainerW = Math.round(effW * newM)
       const newContainerH = Math.round(effH * newM)
 

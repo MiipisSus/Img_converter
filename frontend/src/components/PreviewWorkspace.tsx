@@ -52,8 +52,8 @@ export function PreviewWorkspace({
     const cropPxW = cropW / M;
     const cropPxH = cropH / M;
 
-    // 預覽顯示倍率 — 受限於容器實際尺寸 × 0.95 呼吸空間，不放大超過原始像素
-    const PM = Math.min(maxPreviewWidth * 0.95 / cropPxW, maxPreviewHeight * 0.95 / cropPxH, 1);
+    // 預覽顯示倍率 — 統一公式: M = min(viewW * 0.9 / effW, viewH * 0.9 / effH, 1)
+    const PM = Math.min(maxPreviewWidth * 0.9 / cropPxW, maxPreviewHeight * 0.9 / cropPxH, 1);
     const displayW = Math.round(cropPxW * PM);
     const displayH = Math.round(cropPxH * PM);
 
@@ -123,7 +123,7 @@ export function PreviewWorkspace({
 
   // ── 點陣圖預覽 (output 模式或無編輯狀態) ──
   const displayUrl = previewUrl ?? originalSrc;
-  const M_out = Math.min(maxPreviewWidth * 0.95 / outputWidth, maxPreviewHeight * 0.95 / outputHeight, 1);
+  const M_out = Math.min(maxPreviewWidth * 0.9 / outputWidth, maxPreviewHeight * 0.9 / outputHeight, 1);
   const displayWidth = Math.round(outputWidth * M_out);
   const displayHeight = Math.round(outputHeight * M_out);
 
