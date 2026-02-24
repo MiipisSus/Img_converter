@@ -1,4 +1,4 @@
-import { useState, useMemo, useRef, useLayoutEffect } from "react";
+import { useState, useMemo, useRef, useCallback, useEffect, useLayoutEffect } from "react";
 import { PreviewWorkspace } from "../components/PreviewWorkspace";
 import { DarkEditableNumber } from "../components/DarkEditableNumber";
 import { generateCroppedImage } from "../utils/generateCroppedImage";
@@ -8,21 +8,26 @@ import type { PipelineState, OutputSettings, ImageItem } from "../types";
 interface ExportPageProps {
   images: ImageItem[];
   activeImageId: string;
+  onSelectImage: (id: string) => void;
   imageRef: React.MutableRefObject<HTMLImageElement | null>;
-  setPipelineState: React.Dispatch<
-    React.SetStateAction<PipelineState | null>
-  >;
+  setPipelineState: React.Dispatch<React.SetStateAction<PipelineState | null>>;
+  setImages: React.Dispatch<React.SetStateAction<ImageItem[]>>;
   onReturn: () => void;
 }
 
 export function ExportPage({
   images,
   activeImageId,
+  onSelectImage,
   imageRef,
   setPipelineState,
+  setImages,
   onReturn,
 }: ExportPageProps) {
   const [isExporting, setIsExporting] = useState(false);
+  const [unifiedOutput, setUnifiedOutput] = useState(true);
+  const unifiedOutputRef = useRef(unifiedOutput);
+  unifiedOutputRef.current = unifiedOutput;
 
   // ── 預覽區域容器尺寸追蹤 ──
   const previewContainerRef = useRef<HTMLDivElement>(null);
@@ -56,11 +61,9 @@ export function ExportPage({
   const { pipelineState } = activeImage;
   const imageSrc = activeImage.src;
 
-  // 初始化輸出設定 (進入時計算一次)
-  const initialSettings = useMemo<OutputSettings>(() => {
-    const { editorState, imageInfo } = pipelineState;
-    const croppedSize = getCroppedOriginalSize(editorState, imageInfo);
-
+  // ── 輸出設定 (local state) ──
+  const [outputSettings, setOutputSettings] = useState<OutputSettings>(() => {
+    const croppedSize = getCroppedOriginalSize(pipelineState.editorState, pipelineState.imageInfo);
     return {
       targetWidth: croppedSize.width,
       targetHeight: croppedSize.height,
@@ -73,117 +76,131 @@ export function ExportPage({
       enableTargetKB: false,
       lastExportSize: pipelineState.previewBlob?.size ?? null,
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // 只在 mount 時計算一次
+  });
+  const outputSettingsRef = useRef(outputSettings);
+  outputSettingsRef.current = outputSettings;
 
-  const [outputSettings, setOutputSettings] =
-    useState<OutputSettings>(initialSettings);
+  // ── 切換 activeImage 時同步 local settings ──
+  const prevActiveIdRef = useRef(activeImageId);
+  useEffect(() => {
+    if (prevActiveIdRef.current === activeImageId) return;
+    prevActiveIdRef.current = activeImageId;
+    const img = images.find((i) => i.id === activeImageId);
+    if (!img) return;
+    const croppedSize = getCroppedOriginalSize(
+      img.pipelineState.editorState,
+      img.pipelineState.imageInfo,
+    );
+    setOutputSettings((prev) => ({
+      ...prev,
+      baseWidth: croppedSize.width,
+      baseHeight: croppedSize.height,
+      targetWidth: img.pipelineState.resize.targetWidth || croppedSize.width,
+      targetHeight: img.pipelineState.resize.targetHeight || croppedSize.height,
+      lastExportSize: img.pipelineState.previewBlob?.size ?? null,
+    }));
+  }, [activeImageId, images]);
 
-  // 更新輸出設定
-  const handleUpdateOutputSettings = (
-    updates: Partial<OutputSettings>,
-  ) => {
-    setOutputSettings((prev) => ({ ...prev, ...updates }));
-  };
+  // ── 廣播格式/品質到所有圖片 ──
+  const broadcastFormatQuality = useCallback(
+    (updates: { exportFormat?: "png" | "jpeg" | "webp"; exportQuality?: number }) => {
+      setImages((prev) =>
+        prev.map((img) => ({
+          ...img,
+          ...(updates.exportFormat !== undefined && { exportFormat: updates.exportFormat }),
+          ...(updates.exportQuality !== undefined && { exportQuality: updates.exportQuality }),
+        })),
+      );
+    },
+    [setImages],
+  );
 
-  // 套用輸出設定並生成最終圖片
+  // ── 更新輸出設定 (format/quality 在統一輸出 ON 時立即廣播) ──
+  const handleUpdateOutputSettings = useCallback(
+    (updates: Partial<OutputSettings>) => {
+      setOutputSettings((prev) => ({ ...prev, ...updates }));
+      if (!unifiedOutputRef.current) return;
+      if (updates.format !== undefined) {
+        broadcastFormatQuality({ exportFormat: updates.format });
+      }
+      if (updates.quality !== undefined) {
+        broadcastFormatQuality({ exportQuality: updates.quality });
+      }
+    },
+    [broadcastFormatQuality],
+  );
+
+  // ── 統一輸出開關 ──
+  const handleToggleUnified = useCallback(() => {
+    setUnifiedOutput((prev) => {
+      if (!prev) {
+        // 開啟時：將當前格式/品質廣播到所有圖片
+        const s = outputSettingsRef.current;
+        broadcastFormatQuality({ exportFormat: s.format, exportQuality: s.quality });
+      }
+      return !prev;
+    });
+  }, [broadcastFormatQuality]);
+
+  // ── 套用輸出設定並生成最終圖片 ──
   const handleApplyOutput = async () => {
     if (!imageRef.current || isExporting) return;
 
     setIsExporting(true);
     try {
       const { editorState, imageInfo } = pipelineState;
-      const {
-        targetWidth,
-        targetHeight,
-        format,
-        quality,
-        enableTargetKB,
-        targetKB,
-      } = outputSettings;
+      const { targetWidth, targetHeight, format, quality, enableTargetKB, targetKB } =
+        outputSettings;
 
       const mimeType =
-        format === "png"
-          ? "image/png"
-          : format === "jpeg"
-            ? "image/jpeg"
-            : "image/webp";
+        format === "png" ? "image/png" : format === "jpeg" ? "image/jpeg" : "image/webp";
 
       let result: Awaited<ReturnType<typeof generateCroppedImage>>;
       let finalQuality = quality / 100;
 
       if (enableTargetKB && targetKB && format !== "png") {
         const targetBytes = targetKB * 1024;
-        let minQuality = 0.1;
-        let maxQuality = 1.0;
+        let minQ = 0.1;
+        let maxQ = 1.0;
         let attempts = 0;
-        const maxAttempts = 10;
 
-        result = await generateCroppedImage(
-          imageRef.current,
-          editorState,
-          imageInfo,
-          {
-            targetWidth,
-            targetHeight,
-            format: mimeType,
-            quality: maxQuality,
-          },
-        );
+        result = await generateCroppedImage(imageRef.current, editorState, imageInfo, {
+          targetWidth,
+          targetHeight,
+          format: mimeType,
+          quality: maxQ,
+        });
 
         if (result.blob.size <= targetBytes) {
-          finalQuality = maxQuality;
+          finalQuality = maxQ;
         } else {
-          while (
-            attempts < maxAttempts &&
-            maxQuality - minQuality > 0.02
-          ) {
-            const midQuality = (minQuality + maxQuality) / 2;
-            result = await generateCroppedImage(
-              imageRef.current,
-              editorState,
-              imageInfo,
-              {
-                targetWidth,
-                targetHeight,
-                format: mimeType,
-                quality: midQuality,
-              },
-            );
-
-            if (result.blob.size > targetBytes) {
-              maxQuality = midQuality;
-            } else {
-              minQuality = midQuality;
-            }
-            attempts++;
-          }
-          finalQuality = minQuality;
-
-          result = await generateCroppedImage(
-            imageRef.current,
-            editorState,
-            imageInfo,
-            {
+          while (attempts < 10 && maxQ - minQ > 0.02) {
+            const midQ = (minQ + maxQ) / 2;
+            result = await generateCroppedImage(imageRef.current, editorState, imageInfo, {
               targetWidth,
               targetHeight,
               format: mimeType,
-              quality: finalQuality,
-            },
-          );
-        }
-      } else {
-        result = await generateCroppedImage(
-          imageRef.current,
-          editorState,
-          imageInfo,
-          {
+              quality: midQ,
+            });
+            if (result.blob.size > targetBytes) maxQ = midQ;
+            else minQ = midQ;
+            attempts++;
+          }
+          finalQuality = minQ;
+          result = await generateCroppedImage(imageRef.current, editorState, imageInfo, {
             targetWidth,
             targetHeight,
             format: mimeType,
             quality: finalQuality,
-          },
-        );
+          });
+        }
+      } else {
+        result = await generateCroppedImage(imageRef.current, editorState, imageInfo, {
+          targetWidth,
+          targetHeight,
+          format: mimeType,
+          quality: finalQuality,
+        });
       }
 
       setPipelineState((prev) => ({
@@ -239,25 +256,75 @@ export function ExportPage({
             isExporting={isExporting}
             previewUrl={pipelineState.previewUrl}
             previewBlob={pipelineState.previewBlob}
+            unifiedOutput={unifiedOutput}
+            onToggleUnified={handleToggleUnified}
           />
         </div>
       </aside>
 
       {/* ===== 右側預覽區 ===== */}
-      <main ref={previewContainerRef} className="flex-1 bg-preview flex items-center justify-center m-4 rounded-lg overflow-hidden">
-        <PreviewWorkspace
-          editorState={null}
-          imageInfo={null}
-          originalSrc={imageSrc}
-          previewUrl={pipelineState.previewUrl}
-          isProcessing={isExporting}
-          mode="output"
-          outputWidth={pipelineState.outputWidth}
-          outputHeight={pipelineState.outputHeight}
-          visualBaseRotate={0}
-          maxPreviewWidth={viewportSize.width}
-          maxPreviewHeight={viewportSize.height}
-        />
+      <main className="flex-1 flex flex-col h-screen">
+        <div
+          ref={previewContainerRef}
+          className={`flex-1 bg-preview flex items-center justify-center m-4 rounded-lg overflow-hidden ${
+            images.length > 1 ? "mb-0" : ""
+          }`}
+        >
+          <PreviewWorkspace
+            key={activeImageId}
+            editorState={null}
+            imageInfo={null}
+            originalSrc={imageSrc}
+            previewUrl={pipelineState.previewUrl}
+            isProcessing={isExporting}
+            mode="output"
+            outputWidth={pipelineState.outputWidth}
+            outputHeight={pipelineState.outputHeight}
+            visualBaseRotate={0}
+            maxPreviewWidth={viewportSize.width}
+            maxPreviewHeight={viewportSize.height}
+          />
+        </div>
+
+        {/* 縮圖列表 */}
+        {images.length > 1 && (
+          <div className="h-[120px] shrink-0 w-full overflow-x-auto thumbnail-scroll px-5 py-2.5 flex items-center gap-3">
+            {images.map((item) => (
+              <button
+                key={item.id}
+                onClick={() => onSelectImage(item.id)}
+                className={`relative shrink-0 w-16 h-16 rounded-lg overflow-hidden border-2 transition-colors ${
+                  item.id === activeImageId
+                    ? "border-highlight"
+                    : "border-transparent hover:border-white/30"
+                }`}
+              >
+                <img
+                  src={item.pipelineState.previewUrl ?? item.src}
+                  className="w-full h-full object-cover"
+                  alt=""
+                />
+                {unifiedOutput && item.id !== activeImageId && (
+                  <div className="absolute top-0.5 right-0.5 bg-black/50 rounded-full p-0.5">
+                    <svg
+                      className="w-3.5 h-3.5"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="#D4FF3F"
+                      strokeWidth={2.5}
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"
+                      />
+                    </svg>
+                  </div>
+                )}
+              </button>
+            ))}
+          </div>
+        )}
       </main>
     </div>
   );
@@ -277,6 +344,8 @@ function OutputSettingsPanel({
   isExporting,
   previewUrl,
   previewBlob,
+  unifiedOutput,
+  onToggleUnified,
 }: {
   images: ImageItem[];
   settings: OutputSettings;
@@ -286,27 +355,28 @@ function OutputSettingsPanel({
   isExporting: boolean;
   previewUrl: string | null;
   previewBlob: Blob | null;
+  unifiedOutput: boolean;
+  onToggleUnified: () => void;
 }) {
-  const [widthInput, setWidthInput] = useState(
-    String(settings.targetWidth),
-  );
-  const [heightInput, setHeightInput] = useState(
-    String(settings.targetHeight),
-  );
+  const [widthInput, setWidthInput] = useState(String(settings.targetWidth));
+  const [heightInput, setHeightInput] = useState(String(settings.targetHeight));
   const [widthError, setWidthError] = useState(false);
   const [heightError, setHeightError] = useState(false);
 
   const [isPdfExporting, setIsPdfExporting] = useState(false);
-  const [downloadFormat, setDownloadFormat] = useState<"image" | "pdf">(
-    "image",
-  );
+  const [downloadFormat, setDownloadFormat] = useState<"image" | "pdf">("image");
 
   const { baseWidth, baseHeight, lockAspectRatio, format } = settings;
+
+  // 同步外部 settings 變更到 input (切換圖片時)
+  useEffect(() => {
+    setWidthInput(String(settings.targetWidth));
+    setHeightInput(String(settings.targetHeight));
+  }, [settings.targetWidth, settings.targetHeight]);
 
   // 下載處理 (圖片 or PDF)
   const handleDownload = async () => {
     if (downloadFormat === "pdf") {
-      // 批量 PDF：蒐集所有圖片的 previewBlob
       const allBlobs = images
         .map((img) => img.pipelineState.previewBlob)
         .filter((b): b is Blob => b !== null);
@@ -336,42 +406,32 @@ function OutputSettingsPanel({
     }
   };
 
-  // 處理寬度輸入變更
+  // 處理寬度輸入變更 (僅影響當前圖片)
   const handleWidthInputChange = (value: string) => {
     setWidthInput(value);
     setWidthError(false);
-
     const num = parseInt(value);
     if (!isNaN(num) && num >= 1) {
       if (lockAspectRatio) {
-        const aspectRatio = baseHeight / baseWidth;
-        const newHeight = Math.round(num * aspectRatio);
-        setHeightInput(String(Math.max(1, newHeight)));
-        onUpdateSettings({
-          targetWidth: num,
-          targetHeight: Math.max(1, newHeight),
-        });
+        const newHeight = Math.max(1, Math.round(num * (baseHeight / baseWidth)));
+        setHeightInput(String(newHeight));
+        onUpdateSettings({ targetWidth: num, targetHeight: newHeight });
       } else {
         onUpdateSettings({ targetWidth: num });
       }
     }
   };
 
-  // 處理高度輸入變更
+  // 處理高度輸入變更 (僅影響當前圖片)
   const handleHeightInputChange = (value: string) => {
     setHeightInput(value);
     setHeightError(false);
-
     const num = parseInt(value);
     if (!isNaN(num) && num >= 1) {
       if (lockAspectRatio) {
-        const aspectRatio = baseWidth / baseHeight;
-        const newWidth = Math.round(num * aspectRatio);
-        setWidthInput(String(Math.max(1, newWidth)));
-        onUpdateSettings({
-          targetWidth: Math.max(1, newWidth),
-          targetHeight: num,
-        });
+        const newWidth = Math.max(1, Math.round(num * (baseWidth / baseHeight)));
+        setWidthInput(String(newWidth));
+        onUpdateSettings({ targetWidth: newWidth, targetHeight: num });
       } else {
         onUpdateSettings({ targetHeight: num });
       }
@@ -396,22 +456,19 @@ function OutputSettingsPanel({
     }
   };
 
-  // 重設為原始尺寸
+  // 重設為原始尺寸 (僅影響當前圖片)
   const handleResetSize = () => {
     setWidthInput(String(baseWidth));
     setHeightInput(String(baseHeight));
     setWidthError(false);
     setHeightError(false);
-    onUpdateSettings({
-      targetWidth: baseWidth,
-      targetHeight: baseHeight,
-    });
+    onUpdateSettings({ targetWidth: baseWidth, targetHeight: baseHeight });
   };
 
   const isModified =
-    settings.targetWidth !== baseWidth ||
-    settings.targetHeight !== baseHeight;
+    settings.targetWidth !== baseWidth || settings.targetHeight !== baseHeight;
   const hasError = widthError || heightError;
+  const showUnifiedToggle = images.length > 1;
 
   return (
     <div className="flex flex-col gap-3">
@@ -442,7 +499,7 @@ function OutputSettingsPanel({
         </div>
       </div>
 
-      {/* 調整尺寸 */}
+      {/* 調整尺寸 (始終獨立，不受統一輸出影響) */}
       <div className="bg-white/10 rounded-[10px] p-3">
         <p className="text-xs text-white/70 mb-3 font-medium">調整尺寸</p>
 
@@ -482,11 +539,8 @@ function OutputSettingsPanel({
           <span className="text-xs text-white/60 shrink-0">px</span>
         </div>
 
-        {/* 錯誤訊息 */}
         {hasError && (
-          <p className="text-xs text-red-400 mb-2">
-            尺寸不得為空或小於 1
-          </p>
+          <p className="text-xs text-red-400 mb-2">尺寸不得為空或小於 1</p>
         )}
 
         {/* 鎖定比例開關 */}
@@ -500,9 +554,7 @@ function OutputSettingsPanel({
             )}
           </div>
           <button
-            onClick={() =>
-              onUpdateSettings({ lockAspectRatio: !lockAspectRatio })
-            }
+            onClick={() => onUpdateSettings({ lockAspectRatio: !lockAspectRatio })}
             className={`relative w-9 h-5 rounded-full transition-colors flex-shrink-0 ${
               lockAspectRatio ? "bg-highlight" : "bg-white/20"
             }`}
@@ -517,7 +569,6 @@ function OutputSettingsPanel({
           </button>
         </div>
 
-        {/* 重設按鈕 */}
         {isModified && (
           <button
             onClick={handleResetSize}
@@ -528,9 +579,33 @@ function OutputSettingsPanel({
         )}
       </div>
 
+      {/* 統一輸出開關 (多圖時顯示，位於匯出格式上方) */}
+      {showUnifiedToggle && (
+        <div className="flex items-center justify-between bg-white/10 rounded-[10px] p-3">
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-white/80">統一輸出</span>
+            <span className="text-[10px] text-white/50">格式 / 品質</span>
+          </div>
+          <button
+            onClick={onToggleUnified}
+            className={`relative w-9 h-5 rounded-full transition-colors flex-shrink-0 ${
+              unifiedOutput ? "bg-highlight" : "bg-white/20"
+            }`}
+          >
+            <span
+              className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full shadow transition-transform ${
+                unifiedOutput ? "translate-x-4 bg-black" : "translate-x-0 bg-white"
+              }`}
+            />
+          </button>
+        </div>
+      )}
+
       {/* 匯出格式 */}
       <div
-        className={`bg-white/10 rounded-[10px] p-3 transition-opacity ${downloadFormat === "pdf" ? "opacity-40 pointer-events-none" : ""}`}
+        className={`bg-white/10 rounded-[10px] p-3 transition-opacity ${
+          downloadFormat === "pdf" ? "opacity-40 pointer-events-none" : ""
+        }`}
       >
         <p className="text-xs text-white/70 mb-3 font-medium">匯出格式</p>
 
@@ -550,22 +625,15 @@ function OutputSettingsPanel({
           ))}
         </div>
 
-        {/* PNG 說明 */}
         {format === "png" && (
-          <p className="text-xs text-white/60 mb-3">
-            PNG 為無損格式，不支援品質調整
-          </p>
+          <p className="text-xs text-white/60 mb-3">PNG 為無損格式，不支援品質調整</p>
         )}
 
-        {/* 壓縮模式切換 (僅 JPEG/WebP) */}
         {format !== "png" && (
           <div className="pt-3 border-t border-white/10">
-            {/* 模式選擇按鈕 */}
             <div className="flex gap-1 mb-3 bg-white/5 rounded-lg p-0.5">
               <button
-                onClick={() =>
-                  onUpdateSettings({ enableTargetKB: false })
-                }
+                onClick={() => onUpdateSettings({ enableTargetKB: false })}
                 className={`flex-1 px-2 py-1 text-xs rounded-md transition-colors ${
                   !settings.enableTargetKB
                     ? "bg-white/20 text-white font-medium"
@@ -575,9 +643,7 @@ function OutputSettingsPanel({
                 品質控制
               </button>
               <button
-                onClick={() =>
-                  onUpdateSettings({ enableTargetKB: true })
-                }
+                onClick={() => onUpdateSettings({ enableTargetKB: true })}
                 className={`flex-1 px-2 py-1 text-xs rounded-md transition-colors ${
                   settings.enableTargetKB
                     ? "bg-white/20 text-white font-medium"
@@ -588,7 +654,6 @@ function OutputSettingsPanel({
               </button>
             </div>
 
-            {/* 品質滑桿 */}
             {!settings.enableTargetKB && (
               <div>
                 <div className="flex items-center justify-between mb-1">
@@ -598,9 +663,7 @@ function OutputSettingsPanel({
                     min={10}
                     max={100}
                     suffix="%"
-                    onChange={(val) =>
-                      onUpdateSettings({ quality: val })
-                    }
+                    onChange={(val) => onUpdateSettings({ quality: val })}
                   />
                 </div>
                 <input
@@ -609,11 +672,7 @@ function OutputSettingsPanel({
                   max={100}
                   step={1}
                   value={settings.quality}
-                  onChange={(e) =>
-                    onUpdateSettings({
-                      quality: parseInt(e.target.value),
-                    })
-                  }
+                  onChange={(e) => onUpdateSettings({ quality: parseInt(e.target.value) })}
                   className="w-full slider-dark"
                 />
                 <div className="flex justify-between text-[10px] text-white/60 mt-0.5">
@@ -623,7 +682,6 @@ function OutputSettingsPanel({
               </div>
             )}
 
-            {/* 目標 KB 輸入 */}
             {settings.enableTargetKB && (
               <div className="flex items-center gap-2">
                 <span className="text-xs text-white/70">目標</span>
@@ -635,9 +693,7 @@ function OutputSettingsPanel({
                   onChange={(e) => {
                     const val = parseInt(e.target.value);
                     onUpdateSettings({
-                      targetKB: isNaN(val)
-                        ? null
-                        : Math.max(1, val),
+                      targetKB: isNaN(val) ? null : Math.max(1, val),
                     });
                   }}
                   placeholder="KB"
@@ -657,8 +713,7 @@ function OutputSettingsPanel({
         </div>
         {isModified && (
           <div className="text-highlight">
-            輸出尺寸: {settings.targetWidth} × {settings.targetHeight}{" "}
-            px
+            輸出尺寸: {settings.targetWidth} × {settings.targetHeight} px
           </div>
         )}
         {settings.lastExportSize !== null && (

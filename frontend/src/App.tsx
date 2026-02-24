@@ -104,8 +104,10 @@ function App() {
         <ExportPage
           images={images}
           activeImageId={activeImageId}
+          onSelectImage={handleSelectImage}
           imageRef={imageRef}
           setPipelineState={setPipelineState}
+          setImages={setImages}
           onReturn={handleReturnToEdit}
         />
       );
