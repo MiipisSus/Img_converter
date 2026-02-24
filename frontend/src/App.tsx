@@ -30,6 +30,8 @@ interface PipelineState {
   editorState: EditorState;
   imageInfo: ImageInfo;
   previewUrl: string | null;
+  /** 最近一次產生的圖片 Blob (用於 PDF 匯出等) */
+  previewBlob: Blob | null;
   resize: ResizeState;
   /** 實際輸出尺寸 (僅在套用後更新) */
   outputWidth: number;
@@ -195,6 +197,7 @@ function App() {
           editorState: initialState,
           imageInfo: initialImageInfo,
           previewUrl: null,
+          previewBlob: null,
           resize: {
             active: false,
             targetWidth: croppedSize.width,
@@ -427,6 +430,7 @@ function App() {
           editorState: { ...state },
           imageInfo: { ...imageInfo },
           previewUrl: result.dataUrl,
+          previewBlob: result.blob,
           resize: {
             active: keepActiveResize,
             // 如果比例匹配且有 active resize，保留用戶設定的尺寸；否則使用裁切尺寸
@@ -555,6 +559,7 @@ function App() {
       setPipelineState((prev) => ({
         ...prev!,
         previewUrl: result.dataUrl,
+        previewBlob: result.blob,
         outputWidth: result.width,
         outputHeight: result.height,
       }));
@@ -696,6 +701,7 @@ function App() {
       setPipelineState((prev) => ({
         ...prev!,
         previewUrl: result.dataUrl,
+        previewBlob: result.blob,
         outputWidth: result.width,
         outputHeight: result.height,
       }));
@@ -792,6 +798,7 @@ function App() {
           editorState: newState,
           imageInfo: newInfo,
           previewUrl: prev!.previewUrl,
+          previewBlob: prev!.previewBlob,
           resize: {
             ...prev!.resize,
             targetWidth: newTargetWidth,
@@ -821,6 +828,7 @@ function App() {
             ? {
                 ...prev,
                 previewUrl: result.dataUrl,
+                previewBlob: result.blob,
                 outputWidth: result.width,
                 outputHeight: result.height,
               }
@@ -1148,6 +1156,7 @@ function App() {
               onReturn={handleReturnFromOutput}
               isExporting={isExporting}
               previewUrl={pipelineState?.previewUrl ?? null}
+              previewBlob={pipelineState?.previewBlob ?? null}
             />
           )}
         </div>
@@ -1524,6 +1533,7 @@ function OutputSettingsPanel({
   onReturn,
   isExporting,
   previewUrl,
+  previewBlob,
 }: {
   settings: OutputSettings;
   onUpdateSettings: (updates: Partial<OutputSettings>) => void;
@@ -1531,6 +1541,7 @@ function OutputSettingsPanel({
   onReturn: () => void;
   isExporting: boolean;
   previewUrl: string | null;
+  previewBlob: Blob | null;
 }) {
   // 本地輸入狀態 (字串，允許空值)
   const [widthInput, setWidthInput] = useState(String(settings.targetWidth));
@@ -1538,7 +1549,38 @@ function OutputSettingsPanel({
   const [widthError, setWidthError] = useState(false);
   const [heightError, setHeightError] = useState(false);
 
+  const [isPdfExporting, setIsPdfExporting] = useState(false);
+  const [downloadFormat, setDownloadFormat] = useState<"image" | "pdf">("image");
+
   const { baseWidth, baseHeight, lockAspectRatio, format } = settings;
+
+  // 下載處理 (圖片 or PDF)
+  const handleDownload = async () => {
+    if (downloadFormat === "pdf") {
+      if (!previewBlob || isPdfExporting) return;
+      setIsPdfExporting(true);
+      try {
+        const { exportPdf } = await import("./api/exportPdf");
+        const pdfBlob = await exportPdf([previewBlob], "export.pdf");
+        const url = URL.createObjectURL(pdfBlob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = "export.pdf";
+        a.click();
+        URL.revokeObjectURL(url);
+      } catch (err) {
+        console.error("PDF 匯出失敗:", err);
+      } finally {
+        setIsPdfExporting(false);
+      }
+    } else {
+      if (!previewUrl) return;
+      const a = document.createElement("a");
+      a.href = previewUrl;
+      a.download = `processed-image.${format}`;
+      a.click();
+    }
+  };
 
   // 處理寬度輸入變更
   const handleWidthInputChange = (value: string) => {
@@ -1619,6 +1661,26 @@ function OutputSettingsPanel({
   return (
     <div className="flex flex-col gap-3">
       <p className="text-sm text-white font-medium">輸出設定</p>
+
+      {/* 下載格式 */}
+      <div className="bg-white/10 rounded-[10px] p-3">
+        <p className="text-xs text-white/70 mb-3 font-medium">下載格式</p>
+        <div className="flex gap-2">
+          {([["image", "圖片"], ["pdf", "PDF"]] as const).map(([val, label]) => (
+            <button
+              key={val}
+              onClick={() => setDownloadFormat(val)}
+              className={`flex-1 px-2 py-1.5 text-sm rounded-[10px] transition-colors ${
+                downloadFormat === val
+                  ? "bg-highlight text-black font-medium"
+                  : "bg-white/10 text-white/80 hover:bg-white/20"
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
 
       {/* 調整尺寸 */}
       <div className="bg-white/10 rounded-[10px] p-3">
@@ -1705,7 +1767,7 @@ function OutputSettingsPanel({
       </div>
 
       {/* 匯出格式 */}
-      <div className="bg-white/10 rounded-[10px] p-3">
+      <div className={`bg-white/10 rounded-[10px] p-3 transition-opacity ${downloadFormat === "pdf" ? "opacity-40 pointer-events-none" : ""}`}>
         <p className="text-xs text-white/70 mb-3 font-medium">匯出格式</p>
 
         <div className="flex gap-2 mb-3">
@@ -1840,14 +1902,14 @@ function OutputSettingsPanel({
         >
           {isExporting ? "處理中..." : "套用並預覽"}
         </button>
-        {previewUrl && (
-          <a
-            href={previewUrl}
-            download="processed-image.png"
-            className="w-full px-4 py-2 text-center text-sm text-white/80 hover:text-white border border-white/20 rounded-[10px] transition-colors block"
+        {(previewUrl || previewBlob) && (
+          <button
+            onClick={handleDownload}
+            disabled={isPdfExporting}
+            className="w-full px-4 py-2 text-center text-sm text-white/80 hover:text-white border border-white/20 rounded-[10px] transition-colors disabled:opacity-30"
           >
-            下載圖片
-          </a>
+            {isPdfExporting ? "匯出中..." : downloadFormat === "pdf" ? "下載 PDF" : "下載圖片"}
+          </button>
         )}
         <button
           onClick={onReturn}

@@ -1,0 +1,15 @@
+Collecting fpdf2
+  Downloading fpdf2-2.8.6-py3-none-any.whl.metadata (80 kB)
+Requirement already satisfied: defusedxml in ./venv/lib/python3.13/site-packages (from fpdf2) (0.7.1)
+Requirement already satisfied: Pillow!=9.2.*,>=8.3.2 in ./venv/lib/python3.13/site-packages (from fpdf2) (12.1.0)
+Collecting fonttools>=4.34.0 (from fpdf2)
+  Downloading fonttools-4.61.1-cp313-cp313-macosx_10_13_universal2.whl.metadata (114 kB)
+Downloading fpdf2-2.8.6-py3-none-any.whl (326 kB)
+Downloading fonttools-4.61.1-cp313-cp313-macosx_10_13_universal2.whl (2.8 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 2.8/2.8 MB 18.6 MB/s  0:00:00
+Installing collected packages: fonttools, fpdf2
+
+Successfully installed fonttools-4.61.1 fpdf2-2.8.6
+
+[notice] A new release of pip is available: 25.2 -> 26.0.1
+[notice] To update, run: pip install --upgrade pip

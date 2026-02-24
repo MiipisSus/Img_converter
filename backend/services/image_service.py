@@ -1389,3 +1389,46 @@ class ImageService:
             }
         finally:
             img.close()
+
+    def generate_pdf_from_image_bytes_list(self, image_bytes_list: list[bytes]) -> tuple[bytes, int]:
+        """
+        將多張圖片合併為一個 PDF，每張圖片獨立一頁，頁面尺寸 = 圖片尺寸
+
+        Args:
+            image_bytes_list: 圖片 bytes 列表
+
+        Returns:
+            tuple[bytes, int]: (PDF bytes, 頁數)
+        """
+        from fpdf import FPDF
+
+        pdf = FPDF(unit='pt')
+        pdf.set_auto_page_break(auto=False)
+        pdf.set_margin(0)
+
+        page_count = 0
+        for img_bytes in image_bytes_list:
+            img = Image.open(io.BytesIO(img_bytes))
+            try:
+                # RGBA → RGB 合成白底 (PDF 不支援透明)
+                if img.mode in ('RGBA', 'LA', 'PA'):
+                    background = Image.new('RGB', img.size, (255, 255, 255))
+                    background.paste(img, mask=img.split()[-1])
+                    img = background
+                elif img.mode != 'RGB':
+                    img = img.convert('RGB')
+
+                w_pt, h_pt = float(img.width), float(img.height)
+
+                # 將圖片轉為 PNG bytes 給 fpdf2
+                img_io = io.BytesIO()
+                img.save(img_io, format='PNG')
+                img_io.seek(0)
+
+                pdf.add_page(format=(w_pt, h_pt))
+                pdf.image(img_io, x=0, y=0, w=w_pt, h=h_pt)
+                page_count += 1
+            finally:
+                img.close()
+
+        return bytes(pdf.output()), page_count

@@ -8,7 +8,7 @@
 import io
 import asyncio
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List
 from functools import partial
 from concurrent.futures import ThreadPoolExecutor
 
@@ -434,3 +434,89 @@ async def get_image_info(
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"無法讀取圖片資訊: {str(e)}")
+
+
+# 圖片格式 Magic Bytes 前綴 (用於快速驗證)
+IMAGE_MAGIC_PREFIXES = [
+    b'\x89PNG',    # PNG
+    b'\xff\xd8\xff',  # JPEG
+    b'GIF8',       # GIF
+    b'BM',         # BMP
+    b'RIFF',       # WebP
+    b'II*\x00',    # TIFF LE
+    b'MM\x00*',    # TIFF BE
+]
+
+
+@router.post(
+    "/export/pdf",
+    responses={
+        200: {"content": {"application/pdf": {}}, "description": "匯出的 PDF 檔案"},
+        400: {"model": ErrorResponse, "description": "參數錯誤"},
+        500: {"model": ErrorResponse, "description": "處理錯誤"}
+    },
+    summary="匯出多張圖片為 PDF",
+    description="""
+將多張圖片合併為一個 PDF 檔案，每張圖片獨立一頁。
+頁面尺寸與圖片尺寸一致，無邊距。
+
+**Memory First 模式**：全程在記憶體處理，不產生伺服器端臨時檔案。
+    """
+)
+async def export_pdf(
+    images: List[UploadFile] = File(..., description="要匯出的圖片檔案（1~50 張）"),
+    filename: str = Form(default="export.pdf", description="匯出的 PDF 檔名"),
+):
+    """
+    將多張圖片匯出為 PDF
+    """
+    # 驗證圖片數量
+    if len(images) == 0:
+        raise HTTPException(status_code=400, detail="至少需要 1 張圖片")
+    if len(images) > 50:
+        raise HTTPException(status_code=400, detail="最多支援 50 張圖片")
+
+    # 讀取所有圖片到記憶體並驗證
+    image_bytes_list: list[bytes] = []
+    for i, img_file in enumerate(images):
+        try:
+            data = await img_file.read()
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"第 {i+1} 張圖片讀取失敗: {str(e)}")
+
+        if len(data) == 0:
+            raise HTTPException(status_code=400, detail=f"第 {i+1} 張圖片為空")
+
+        # 快速 Magic Bytes 檢查
+        is_image = any(data.startswith(prefix) for prefix in IMAGE_MAGIC_PREFIXES)
+        # 額外檢查 AVIF/HEIF (ftyp box)
+        if not is_image and len(data) >= 12 and data[4:8] == b'ftyp':
+            is_image = True
+        if not is_image:
+            raise HTTPException(status_code=415, detail=f"第 {i+1} 個檔案不是有效的圖片格式")
+
+        image_bytes_list.append(data)
+
+    # 在執行緒池中生成 PDF
+    service = ImageService()
+    try:
+        pdf_bytes, page_count = await run_in_executor_async(
+            service.generate_pdf_from_image_bytes_list,
+            image_bytes_list,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"PDF 生成錯誤: {str(e)}")
+
+    # 確保檔名安全
+    safe_filename = filename.encode('ascii', 'ignore').decode('ascii') or 'export.pdf'
+    if not safe_filename.endswith('.pdf'):
+        safe_filename += '.pdf'
+
+    return StreamingResponse(
+        io.BytesIO(pdf_bytes),
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'attachment; filename="{safe_filename}"',
+            "X-Page-Count": str(page_count),
+        }
+    )
