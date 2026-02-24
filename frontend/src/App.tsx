@@ -155,6 +155,7 @@ function App() {
       setPipelineState(null);
       setMode("preview");
       setOutputSettings(null);
+      visualBaseRotateRef.current = 0;
 
       const img = new Image();
       img.src = src;
@@ -221,6 +222,8 @@ function App() {
   // 拖放狀態
   const [isDragOver, setIsDragOver] = useState(false);
   const dragCounterRef = useRef(0);
+  // 累積視覺旋轉角度 (不取模，用於 CSS 平滑動畫避免 270°→0° 反向插值)
+  const visualBaseRotateRef = useRef(0);
 
   const handleDragEnter = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -664,6 +667,7 @@ function App() {
     setPipelineState(null);
     setMode("preview");
     setOutputSettings(null);
+    visualBaseRotateRef.current = 0;
   }, []);
 
   // === 旋轉/翻轉 ===
@@ -711,7 +715,23 @@ function App() {
           }
         }
 
-        // 傳遞更新後的 resize 參數給 generateCroppedImage
+        // Phase 1: 立即更新狀態 → CSS 過渡動畫開始
+        setPipelineState((prev) => ({
+          editorState: newState,
+          imageInfo: newInfo,
+          previewUrl: prev!.previewUrl,
+          resize: {
+            ...prev!.resize,
+            targetWidth: newTargetWidth,
+            targetHeight: newTargetHeight,
+            croppedWidth: croppedSize.width,
+            croppedHeight: croppedSize.height,
+          },
+          outputWidth: prev!.outputWidth,
+          outputHeight: prev!.outputHeight,
+        }));
+
+        // Phase 2: 背景生成點陣圖
         const resizeOptions = prevResize.active
           ? { targetWidth: newTargetWidth, targetHeight: newTargetHeight }
           : {};
@@ -723,21 +743,17 @@ function App() {
           resizeOptions,
         );
 
-        setPipelineState((prev) => ({
-          editorState: newState,
-          imageInfo: newInfo,
-          previewUrl: result.dataUrl,
-          resize: {
-            ...prev!.resize,
-            // 更新 resize 目標以匹配新的裁切比例
-            targetWidth: newTargetWidth,
-            targetHeight: newTargetHeight,
-            croppedWidth: croppedSize.width,
-            croppedHeight: croppedSize.height,
-          },
-          outputWidth: result.width,
-          outputHeight: result.height,
-        }));
+        // Phase 3: 更新預覽圖和輸出尺寸
+        setPipelineState((prev) =>
+          prev
+            ? {
+                ...prev,
+                previewUrl: result.dataUrl,
+                outputWidth: result.width,
+                outputHeight: result.height,
+              }
+            : prev,
+        );
 
         console.log("變換後尺寸:", result.width, "×", result.height);
       } catch (error) {
@@ -758,6 +774,8 @@ function App() {
   //   imageOffset ──(向量旋轉)──▶ newImageOffset
   const handleRotate = useCallback(
     (direction: "left" | "right") => {
+      // 更新累積視覺旋轉角度 (不取模，確保 CSS 動畫方向正確)
+      visualBaseRotateRef.current += direction === "right" ? 90 : -90;
       applyTransformAndGenerate((prevState, oldInfo) => {
         const oldM = oldInfo.displayMultiplier;
         const S = prevState.scale;
@@ -1078,11 +1096,15 @@ function App() {
       <main className="flex-1 bg-preview flex items-center justify-center m-4 rounded-lg">
         {mode === "preview" || mode === "output" ? (
           <PreviewWorkspace
-            previewUrl={pipelineState?.previewUrl ?? null}
+            editorState={pipelineState?.editorState ?? null}
+            imageInfo={pipelineState?.imageInfo ?? null}
             originalSrc={imageSrc}
+            previewUrl={pipelineState?.previewUrl ?? null}
             isProcessing={isExporting}
+            mode={mode}
             outputWidth={pipelineState?.outputWidth ?? 400}
             outputHeight={pipelineState?.outputHeight ?? 300}
+            visualBaseRotate={visualBaseRotateRef.current}
           />
         ) : (
           pipelineState && (
@@ -1753,27 +1775,122 @@ function calculatePreviewMultiplier(width: number, height: number): number {
   return 1;
 }
 
-/** 預覽工作區 */
+/** 預覽工作區 — preview 模式使用 CSS 即時預覽，output 模式使用點陣圖 */
 function PreviewWorkspace({
-  previewUrl,
+  editorState,
+  imageInfo,
   originalSrc,
+  previewUrl,
   isProcessing,
+  mode,
   outputWidth,
   outputHeight,
+  visualBaseRotate,
 }: {
-  previewUrl: string | null;
+  editorState: EditorState | null;
+  imageInfo: ImageInfo | null;
   originalSrc: string;
+  previewUrl: string | null;
   isProcessing?: boolean;
+  mode: AppMode;
   outputWidth: number;
   outputHeight: number;
+  /** 累積旋轉角度 (不取模，避免 CSS 反向插值) */
+  visualBaseRotate: number;
 }) {
-  const displayUrl = previewUrl ?? originalSrc;
   const hasCropResult = previewUrl !== null;
 
-  // 計算顯示倍率 M
-  const M = calculatePreviewMultiplier(outputWidth, outputHeight);
-  const displayWidth = Math.round(outputWidth * M);
-  const displayHeight = Math.round(outputHeight * M);
+  // ── CSS 即時預覽 (preview 模式 + 有編輯狀態) ──
+  const useCssPreview =
+    mode === "preview" && editorState !== null && imageInfo !== null;
+
+  if (useCssPreview) {
+    const {
+      cropX, cropY, cropW, cropH,
+      scale, rotate, flipX, flipY, imageX, imageY,
+    } = editorState;
+    const {
+      naturalWidth, naturalHeight,
+      displayMultiplier: M,
+      containerWidth, containerHeight,
+    } = imageInfo;
+
+    // 裁切區域的實際像素尺寸
+    const cropPxW = cropW / M;
+    const cropPxH = cropH / M;
+
+    // 預覽顯示倍率
+    const PM = calculatePreviewMultiplier(cropPxW, cropPxH);
+    const displayW = Math.round(cropPxW * PM);
+    const displayH = Math.round(cropPxH * PM);
+
+    // 編輯器座標 → 預覽座標的縮放因子
+    const SP = cropW > 0 ? displayW / cropW : 1;
+
+    // 預覽空間中的圖片尺寸
+    const imgW = naturalWidth * M * SP;
+    const imgH = naturalHeight * M * SP;
+
+    // CSS transform (使用 visualBaseRotate 避免 270°→0° 反向動畫)
+    const flipScaleX = (flipX ? -1 : 1) * scale;
+    const flipScaleY = (flipY ? -1 : 1) * scale;
+    const totalRotate = visualBaseRotate + rotate;
+
+    const easing = "cubic-bezier(0.4, 0, 0.2, 1)";
+    const dur = "0.4s";
+
+    return (
+      <div className="flex flex-col items-center gap-3 relative">
+        {/* 外層容器：裁切視窗，overflow:hidden 實現裁切效果 */}
+        <div
+          className="relative rounded-lg overflow-hidden"
+          style={{
+            width: displayW,
+            height: displayH,
+            transition: `width ${dur} ${easing}, height ${dur} ${easing}`,
+          }}
+        >
+          {/* 內層定位容器：模擬完整編輯器容器，偏移以對齊裁切區域 */}
+          <div
+            className="absolute flex items-center justify-center"
+            style={{
+              width: containerWidth * SP,
+              height: containerHeight * SP,
+              left: -cropX * SP,
+              top: -cropY * SP,
+              transition: `left ${dur} ${easing}, top ${dur} ${easing}, width ${dur} ${easing}, height ${dur} ${easing}`,
+            }}
+          >
+            <img
+              src={originalSrc}
+              alt="Preview"
+              draggable={false}
+              className="max-w-none pointer-events-none"
+              style={{
+                width: imgW,
+                height: imgH,
+                transform: `translate(${imageX * SP}px, ${imageY * SP}px) scale(${flipScaleX}, ${flipScaleY}) rotate(${totalRotate}deg)`,
+                transformOrigin: "center center",
+                transition: `transform ${dur} ${easing}, width ${dur} ${easing}, height ${dur} ${easing}`,
+              }}
+            />
+          </div>
+        </div>
+
+        {!hasCropResult && (
+          <span className="mt-1 text-sm text-gray-400 cursor-not-allowed">
+            使用左側工具進行編輯
+          </span>
+        )}
+      </div>
+    );
+  }
+
+  // ── 點陣圖預覽 (output 模式或無編輯狀態) ──
+  const displayUrl = previewUrl ?? originalSrc;
+  const M_out = calculatePreviewMultiplier(outputWidth, outputHeight);
+  const displayWidth = Math.round(outputWidth * M_out);
+  const displayHeight = Math.round(outputHeight * M_out);
 
   return (
     <div className="flex flex-col items-center gap-3 relative">
