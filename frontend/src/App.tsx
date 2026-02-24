@@ -141,6 +141,7 @@ function App() {
   const editorControlRef = useRef<{
     setScale: (s: number) => void;
     setRotate: (r: number) => void;
+    setCropBox: (crop: { cropX: number; cropY: number; cropW: number; cropH: number }, animated?: boolean) => void;
   } | null>(null);
   const [cropViewState, setCropViewState] = useState({ scale: 1, rotate: 0 });
 
@@ -457,6 +458,77 @@ function App() {
   const handleCancelCrop = useCallback(() => {
     setMode("preview");
   }, []);
+
+  // 裁切比例按鈕 (一次性調整，不鎖定比例)
+  const handleSetCropRatio = useCallback(
+    (ratioW: number, ratioH: number) => {
+      if (!pipelineState || !editorControlRef.current) return;
+
+      const { editorState, imageInfo } = pipelineState;
+      const { cropX, cropY, cropW, cropH, scale } = editorState;
+      const { displayMultiplier: M } = imageInfo;
+
+      // 計算有效尺寸 (考慮 baseRotate)
+      const isLeaning = Math.abs(editorState.baseRotate % 180) === 90;
+      const effW = isLeaning ? imageInfo.naturalHeight : imageInfo.naturalWidth;
+      const effH = isLeaning ? imageInfo.naturalWidth : imageInfo.naturalHeight;
+
+      // 圖片在 UI 上的實際顯示寬高
+      const visW = effW * M * scale;
+      const visH = effH * M * scale;
+
+      // 以較小邊為基準計算目標尺寸
+      const minSide = Math.min(cropW, cropH);
+      const ratio = ratioW / ratioH;
+      let newW: number, newH: number;
+
+      if (ratio >= 1) {
+        // 橫向或正方形
+        newW = minSide * ratio;
+        newH = minSide;
+      } else {
+        // 縱向
+        newW = minSide;
+        newH = minSide / ratio;
+      }
+
+      // 邊界校正：不超過圖片可見區域
+      if (newW > visW) {
+        newH = newH * (visW / newW);
+        newW = visW;
+      }
+      if (newH > visH) {
+        newW = newW * (visH / newH);
+        newH = visH;
+      }
+
+      // 保持中心點不變
+      const oldCenterX = cropX + cropW / 2;
+      const oldCenterY = cropY + cropH / 2;
+      let newX = oldCenterX - newW / 2;
+      let newY = oldCenterY - newH / 2;
+
+      // 二次校正：確保裁切框在容器範圍內
+      // 裁切框邊界 = 容器中心 ± visW/2 (即圖片邊界)
+      const containerW = imageInfo.containerWidth;
+      const containerH = imageInfo.containerHeight;
+      const imgLeft = (containerW - visW) / 2 + editorState.imageX;
+      const imgTop = (containerH - visH) / 2 + editorState.imageY;
+      const imgRight = imgLeft + visW;
+      const imgBottom = imgTop + visH;
+
+      if (newX < imgLeft) newX = imgLeft;
+      if (newY < imgTop) newY = imgTop;
+      if (newX + newW > imgRight) newX = imgRight - newW;
+      if (newY + newH > imgBottom) newY = imgBottom - newH;
+
+      editorControlRef.current.setCropBox(
+        { cropX: newX, cropY: newY, cropW: newW, cropH: newH },
+        true,
+      );
+    },
+    [pipelineState],
+  );
 
   // === 輸出模式相關 ===
 
@@ -1064,6 +1136,7 @@ function App() {
               rotate={cropViewState.rotate}
               onScaleChange={(s) => editorControlRef.current?.setScale(s)}
               onRotateChange={(r) => editorControlRef.current?.setRotate(r)}
+              onSetCropRatio={handleSetCropRatio}
             />
           )}
 
@@ -1247,7 +1320,7 @@ function CropToolPanel({
   );
 }
 
-/** 裁切控制面板 (Crop mode) — 含縮放/旋轉滑桿 */
+/** 裁切控制面板 (Crop mode) — 含比例按鈕、縮放/旋轉滑桿 */
 function CropControlPanel({
   onConfirm,
   onCancel,
@@ -1256,6 +1329,7 @@ function CropControlPanel({
   rotate,
   onScaleChange,
   onRotateChange,
+  onSetCropRatio,
 }: {
   onConfirm: () => void;
   onCancel: () => void;
@@ -1264,11 +1338,41 @@ function CropControlPanel({
   rotate: number;
   onScaleChange: (s: number) => void;
   onRotateChange: (r: number) => void;
+  onSetCropRatio: (ratioW: number, ratioH: number) => void;
 }) {
+  const ratios: { label: string; w: number; h: number }[] = [
+    { label: "1:1", w: 1, h: 1 },
+    { label: "4:5", w: 4, h: 5 },
+    { label: "5:4", w: 5, h: 4 },
+    { label: "2:3", w: 2, h: 3 },
+    { label: "3:2", w: 3, h: 2 },
+    { label: "9:16", w: 9, h: 16 },
+    { label: "16:9", w: 16, h: 9 },
+    { label: "3:4", w: 3, h: 4 },
+    { label: "4:3", w: 4, h: 3 },
+  ];
+
   return (
     <div className="flex flex-col gap-3">
       <p className="text-sm text-white font-medium">裁切模式</p>
       <p className="text-xs text-white/70">拖動框框調整裁切範圍，滾輪縮放</p>
+
+      {/* 比例按鈕 */}
+      <div className="bg-white/10 rounded-[10px] p-3">
+        <p className="text-xs text-white/70 font-medium mb-2">裁切比例</p>
+        <div className="grid grid-cols-3 gap-1.5">
+          {ratios.map(({ label, w, h }) => (
+            <button
+              key={label}
+              onClick={() => onSetCropRatio(w, h)}
+              className="px-2 py-1.5 text-xs font-medium rounded-md border transition-colors
+                border-highlight/40 text-highlight hover:bg-highlight/20 hover:border-highlight"
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
 
       {/* 縮放滑桿 */}
       <div className="bg-white/10 rounded-[10px] p-3">

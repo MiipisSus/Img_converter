@@ -21,10 +21,11 @@ interface ImageEditorProps {
     flipX: () => void;
     flipY: () => void;
   } | null>;
-  /** 縮放/旋轉控制回調 (由外部 sidebar 控制) */
+  /** 縮放/旋轉/裁切框控制回調 (由外部 sidebar 控制) */
   onEditorControlRef?: React.MutableRefObject<{
     setScale: (s: number) => void;
     setRotate: (r: number) => void;
+    setCropBox: (crop: { cropX: number; cropY: number; cropW: number; cropH: number }, animated?: boolean) => void;
   } | null>;
 }
 
@@ -45,6 +46,7 @@ export function ImageEditor({
   const [isResizing, setIsResizing] = useState<ResizeHandle | null>(null);
   const [isDraggingImage, setIsDraggingImage] = useState(false);
   const [isSnappingBack, setIsSnappingBack] = useState(false);
+  const [isCropAnimating, setIsCropAnimating] = useState(false);
   const dragStartRef = useRef({
     x: 0,
     y: 0,
@@ -92,17 +94,27 @@ export function ImageEditor({
     };
   }, [onRotateFlipRef, rotateBy90, toggleFlipX, toggleFlipY]);
 
-  // 暴露縮放/旋轉控制給外部 sidebar
+  // 暴露縮放/旋轉/裁切框控制給外部 sidebar
   useEffect(() => {
     if (onEditorControlRef) {
-      onEditorControlRef.current = { setScale, setRotate };
+      onEditorControlRef.current = {
+        setScale,
+        setRotate,
+        setCropBox: (crop, animated = false) => {
+          if (animated) {
+            setIsCropAnimating(true);
+            setTimeout(() => setIsCropAnimating(false), 450);
+          }
+          setCropBox(crop);
+        },
+      };
     }
     return () => {
       if (onEditorControlRef) {
         onEditorControlRef.current = null;
       }
     };
-  }, [onEditorControlRef, setScale, setRotate]);
+  }, [onEditorControlRef, setScale, setRotate, setCropBox]);
 
   // 圖片載入 - 初始化編輯器
   const handleImageLoad = useCallback(() => {
@@ -228,6 +240,11 @@ export function ImageEditor({
   const containerWidth = imageInfo?.containerWidth ?? 400;
   const containerHeight = imageInfo?.containerHeight ?? 300;
 
+  // 裁切框動畫過渡 (僅在程式化設定裁切比例時啟用，手動拖動時不啟用)
+  const cropTransition = isCropAnimating && !isResizing && !isDraggingImage
+    ? "all 0.4s cubic-bezier(0.4, 0, 0.2, 1)"
+    : "none";
+
   return (
     <div className="flex flex-col gap-4" style={{ width: containerWidth }}>
       {/* 容器 - V6: 尺寸 = 原始尺寸 * displayMultiplier，保持原始比例 */}
@@ -293,15 +310,15 @@ export function ImageEditor({
             <div className="absolute inset-0 pointer-events-none">
               <div
                 className="absolute bg-black/50"
-                style={{ top: 0, left: 0, right: 0, height: cropY }}
+                style={{ top: 0, left: 0, right: 0, height: cropY, transition: cropTransition }}
               />
               <div
                 className="absolute bg-black/50"
-                style={{ top: cropY + cropH, left: 0, right: 0, bottom: 0 }}
+                style={{ top: cropY + cropH, left: 0, right: 0, bottom: 0, transition: cropTransition }}
               />
               <div
                 className="absolute bg-black/50"
-                style={{ top: cropY, left: 0, width: cropX, height: cropH }}
+                style={{ top: cropY, left: 0, width: cropX, height: cropH, transition: cropTransition }}
               />
               <div
                 className="absolute bg-black/50"
@@ -310,6 +327,7 @@ export function ImageEditor({
                   left: cropX + cropW,
                   right: 0,
                   height: cropH,
+                  transition: cropTransition,
                 }}
               />
             </div>
@@ -326,6 +344,7 @@ export function ImageEditor({
               width: cropW,
               height: cropH,
               borderColor: "#D4FF3F",
+              transition: cropTransition,
             }}
           >
             {/* 九宮格 */}
