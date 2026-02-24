@@ -793,6 +793,7 @@ export function EditorPage({
         <div ref={previewContainerRef} className="flex-1 bg-preview flex items-center justify-center m-4 mb-0 rounded-lg overflow-hidden">
           {mode === "preview" ? (
             <PreviewWorkspace
+              key={activeImageId}
               editorState={pipelineState.editorState}
               imageInfo={pipelineState.imageInfo}
               originalSrc={imageSrc}
