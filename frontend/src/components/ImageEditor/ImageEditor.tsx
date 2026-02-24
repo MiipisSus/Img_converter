@@ -152,7 +152,6 @@ export function ImageEditor({
   // --- 拖動圖片 (框定型：非控制點區域皆為圖片拖動) ---
   const handleContainerMouseDown = useCallback(
     (e: React.MouseEvent) => {
-      if (state.scale <= 1 && state.rotate === 0) return;
       setIsDraggingImage(true);
       dragStartRef.current = {
         x: e.clientX,
@@ -253,11 +252,7 @@ export function ImageEditor({
         style={{
           width: containerWidth,
           height: containerHeight,
-          cursor: isDraggingImage
-            ? "grabbing"
-            : scale > 1 || Math.abs(rotate) > 0
-              ? "grab"
-              : "default",
+          cursor: isDraggingImage ? "grabbing" : "grab",
         }}
         onWheel={handleWheel}
         onMouseDown={handleContainerMouseDown}
