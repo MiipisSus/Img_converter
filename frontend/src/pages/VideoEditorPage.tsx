@@ -141,6 +141,13 @@ export function VideoEditorPage({ video, onReset }: VideoEditorPageProps) {
   // ── 編輯模式 ──
   const [mode, setMode] = useState<EditorMode>("default");
 
+  // ── 旋轉/翻轉 ──
+  const [baseRotate, setBaseRotate] = useState(0);       // 0, 90, 180, 270
+  const visualRotateRef = useRef(0);                      // 累積角度 (不取模，避免 270°→0° 反向插值)
+  const [visualRotate, setVisualRotate] = useState(0);    // 驅動 CSS 動畫的值
+  const [flipX, setFlipX] = useState(false);
+  const [flipY, setFlipY] = useState(false);
+
   // ── 裁剪參數 ──
   const [startT, setStartT] = useState(0);
   const [endT, setEndT] = useState(0);
@@ -255,6 +262,30 @@ export function VideoEditorPage({ video, onReset }: VideoEditorPageProps) {
     const ratio = trimDuration / duration;
     return Math.round(estimate.original_size_kb * ratio);
   }, [estimate, duration, trimDuration]);
+
+  // ── 旋轉 ──
+  const handleRotate = useCallback((direction: "left" | "right") => {
+    visualRotateRef.current += direction === "right" ? 90 : -90;
+    setVisualRotate(visualRotateRef.current);
+    setBaseRotate((prev) => (direction === "right" ? (prev + 90) % 360 : (prev - 90 + 360) % 360));
+  }, []);
+
+  const handleRotateLeft = useCallback(() => handleRotate("left"), [handleRotate]);
+  const handleRotateRight = useCallback(() => handleRotate("right"), [handleRotate]);
+
+  // ── 翻轉 ──
+  const handleFlipX = useCallback(() => setFlipX((prev) => !prev), []);
+  const handleFlipY = useCallback(() => setFlipY((prev) => !prev), []);
+
+  // ── 影片 CSS transform ──
+  const videoTransform = useMemo(() => {
+    const sx = flipX ? -1 : 1;
+    const sy = flipY ? -1 : 1;
+    return `scale(${sx}, ${sy}) rotate(${visualRotate}deg)`;
+  }, [flipX, flipY, visualRotate]);
+
+  // 90° 旋轉時需要縮放影片以適應容器 (寬高互換)
+  const isRotated90 = baseRotate % 180 !== 0;
 
   // ── 進入裁剪模式 ──
   const handleEnterTrim = useCallback(() => {
@@ -407,37 +438,50 @@ export function VideoEditorPage({ video, onReset }: VideoEditorPageProps) {
                 編輯模式
               </button>
 
-              {/* 工具區塊 */}
+              {/* 旋轉區塊 */}
               <div className="bg-white/10 rounded-[10px] p-3">
                 <p className="text-xs text-white/70 mb-2 font-medium">旋轉</p>
                 <div className="grid grid-cols-2 gap-2">
                   <button
-                    className="px-2 py-2 text-sm bg-white/10 hover:bg-white/20 text-white rounded-[10px] transition-colors opacity-40 cursor-not-allowed"
-                    disabled
+                    onClick={handleRotateLeft}
+                    className="px-2 py-2 text-sm bg-white/10 hover:bg-white/20 text-white rounded-[10px] transition-colors"
+                    title="左轉 90°"
                   >
                     ↺ 左轉
                   </button>
                   <button
-                    className="px-2 py-2 text-sm bg-white/10 hover:bg-white/20 text-white rounded-[10px] transition-colors opacity-40 cursor-not-allowed"
-                    disabled
+                    onClick={handleRotateRight}
+                    className="px-2 py-2 text-sm bg-white/10 hover:bg-white/20 text-white rounded-[10px] transition-colors"
+                    title="右轉 90°"
                   >
                     ↻ 右轉
                   </button>
                 </div>
               </div>
 
+              {/* 翻轉區塊 */}
               <div className="bg-white/10 rounded-[10px] p-3">
                 <p className="text-xs text-white/70 mb-2 font-medium">翻轉</p>
                 <div className="grid grid-cols-2 gap-2">
                   <button
-                    className="px-2 py-2 text-sm bg-white/10 hover:bg-white/20 text-white rounded-[10px] transition-colors opacity-40 cursor-not-allowed"
-                    disabled
+                    onClick={handleFlipX}
+                    className={`px-2 py-2 text-sm rounded-[10px] transition-colors ${
+                      flipX
+                        ? "bg-[#00B4FF] text-white font-medium"
+                        : "bg-white/10 hover:bg-white/20 text-white"
+                    }`}
+                    title="水平翻轉"
                   >
                     ⇆ 水平
                   </button>
                   <button
-                    className="px-2 py-2 text-sm bg-white/10 hover:bg-white/20 text-white rounded-[10px] transition-colors opacity-40 cursor-not-allowed"
-                    disabled
+                    onClick={handleFlipY}
+                    className={`px-2 py-2 text-sm rounded-[10px] transition-colors ${
+                      flipY
+                        ? "bg-[#00B4FF] text-white font-medium"
+                        : "bg-white/10 hover:bg-white/20 text-white"
+                    }`}
+                    title="垂直翻轉"
                   >
                     ⇅ 垂直
                   </button>
@@ -452,6 +496,7 @@ export function VideoEditorPage({ video, onReset }: VideoEditorPageProps) {
                     <div>長度: {formatTime(videoInfo.duration)}</div>
                   </>
                 )}
+                <div>旋轉: {((baseRotate % 360) + 360) % 360}°</div>
               </div>
             </div>
           )}
@@ -540,7 +585,12 @@ export function VideoEditorPage({ video, onReset }: VideoEditorPageProps) {
           <video
             ref={videoRef}
             src={videoUrlRef.current}
-            className="max-w-full max-h-full"
+            className={isRotated90 ? "max-w-full max-h-full" : "max-w-full max-h-full"}
+            style={{
+              transform: videoTransform,
+              transition: "transform 0.4s cubic-bezier(0.4, 0, 0.2, 1)",
+              ...(isRotated90 ? { maxWidth: "100vh", maxHeight: "100vw" } : {}),
+            }}
             muted
             autoPlay
             loop
