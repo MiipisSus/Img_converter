@@ -13,6 +13,7 @@ import {
 import type { EditorState, ImageInfo } from "../hooks/useImageEditor";
 import type { PipelineState, ImageItem } from "../types";
 import { loadImageFile } from "../utils/loadImageFile";
+import logoImg from "../assets/pic_logo.png";
 
 type EditorMode = "preview" | "crop";
 
@@ -749,8 +750,8 @@ export function EditorPage({
       {/* ===== 左側 Sidebar ===== */}
       <aside className="w-[30%] min-w-[240px] max-w-[320px] flex flex-col h-screen sticky top-0 sidebar-scroll overflow-y-auto bg-sidebar">
         {/* 頂部: 標題 */}
-        <div className="p-4 pb-2">
-          <h1 className="text-lg font-bold text-white">圖片處理工具</h1>
+        <div className="p-4 pb-2 mx-auto mb-6">
+          <img src={logoImg} alt="picgopic!" className="h-16" />
         </div>
 
         {/* 中部: 模式面板 */}
@@ -758,7 +759,6 @@ export function EditorPage({
           {mode === "preview" && (
             <CropToolPanel
               onEnterCropMode={handleEnterCropMode}
-              onEnterOutputMode={handleEnterOutputMode}
               onRotateLeft={handleRotateLeft}
               onRotateRight={handleRotateRight}
               onFlipX={handleFlipX}
@@ -788,14 +788,23 @@ export function EditorPage({
           )}
         </div>
 
-        {/* 底部: 選擇其他圖片 */}
-        <div className="p-4 pt-0">
+        {/* 底部: 導出 + 返回 */}
+        <div className="p-4 pt-0 flex flex-col gap-2">
+          {mode === "preview" && (
+            <button
+              onClick={handleEnterOutputMode}
+              disabled={isExporting}
+              className="w-full px-4 py-3 bg-highlight text-black font-bold rounded-[10px] transition-all btn-highlight disabled:opacity-30"
+            >
+              導出圖片
+            </button>
+          )}
           {mode === "preview" && (
             <button
               onClick={onReset}
-              className="w-full px-4 py-2 text-white/70 hover:text-white text-sm transition-colors"
+              className="w-full px-4 py-2 text-white/70 hover:text-white text-md transition-colors"
             >
-              選擇其他圖片
+              返回
             </button>
           )}
         </div>
@@ -889,7 +898,6 @@ export function EditorPage({
 /** 裁切工具面板 (Preview mode) */
 function CropToolPanel({
   onEnterCropMode,
-  onEnterOutputMode,
   onRotateLeft,
   onRotateRight,
   onFlipX,
@@ -900,7 +908,6 @@ function CropToolPanel({
   pipelineState,
 }: {
   onEnterCropMode: () => void;
-  onEnterOutputMode: () => void;
   onRotateLeft: () => void;
   onRotateRight: () => void;
   onFlipX: () => void;
@@ -912,6 +919,15 @@ function CropToolPanel({
 }) {
   return (
     <div className="flex flex-col gap-3">
+      {/* 進入裁切模式 */}
+      <button
+        onClick={onEnterCropMode}
+        disabled={isExporting}
+        className="w-full px-4 py-3 bg-highlight text-black font-bold rounded-[10px] transition-all btn-highlight disabled:opacity-30"
+      >
+        進入裁切模式
+      </button>
+
       {/* 旋轉區塊 */}
       <div className="bg-white/10 rounded-[10px] p-3">
         <p className="text-xs text-white/70 mb-2 font-medium">旋轉</p>
@@ -982,24 +998,6 @@ function CropToolPanel({
           px
         </div>
         <div>旋轉: {pipelineState.editorState.baseRotate}°</div>
-      </div>
-
-      {/* 底部按鈕 */}
-      <div className="flex flex-col gap-2 mt-auto pt-4">
-        <button
-          onClick={onEnterCropMode}
-          disabled={isExporting}
-          className="w-full px-4 py-3 bg-white/10 hover:bg-white/20 disabled:opacity-30 text-white rounded-[10px] transition-colors font-medium"
-        >
-          進入裁切模式
-        </button>
-        <button
-          onClick={onEnterOutputMode}
-          disabled={isExporting}
-          className="w-full px-4 py-3 bg-highlight text-black font-bold rounded-[10px] transition-all btn-highlight disabled:opacity-30"
-        >
-          導出圖片
-        </button>
       </div>
     </div>
   );

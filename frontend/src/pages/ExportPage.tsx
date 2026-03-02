@@ -4,6 +4,7 @@ import { DarkEditableNumber } from "../components/DarkEditableNumber";
 import { generateCroppedImage } from "../utils/generateCroppedImage";
 import { getCroppedOriginalSize } from "../utils/containerParams";
 import type { OutputSettings, ImageItem, ExportFormat } from "../types";
+import logoImg from "../assets/pic_logo.png";
 
 interface ExportPageProps {
   images: ImageItem[];
@@ -411,7 +412,7 @@ export function ExportPage({
       <aside className="w-[30%] min-w-[240px] max-w-[320px] flex flex-col h-screen sticky top-0 sidebar-scroll overflow-y-auto bg-sidebar">
         {/* 頂部: 標題 */}
         <div className="p-4 pb-2">
-          <h1 className="text-lg font-bold text-white">圖片處理工具</h1>
+          <img src={logoImg} alt="picgopic!" className="h-8" />
         </div>
 
         {/* 中部: 輸出設定面板 */}
@@ -420,7 +421,6 @@ export function ExportPage({
             images={images}
             settings={outputSettings}
             onUpdateSettings={handleUpdateOutputSettings}
-            onReturn={onReturn}
             unifiedOutput={unifiedOutput}
             onToggleUnified={handleToggleUnified}
             totalEstimatedSize={totalEstimatedSize}
@@ -429,13 +429,34 @@ export function ExportPage({
             onBatchEstimate={handleBatchEstimate}
             downloadFormat={downloadFormat}
             onDownloadFormatChange={setDownloadFormat}
-            onDownload={handleDownload}
-            isDownloading={isDownloading}
             targetKBScope={targetKBScope}
             onTargetKBScopeChange={handleSetTargetKBScope}
             onResetFormat={handleResetFormat}
             originalFormat={activeImage.originalFormat}
           />
+        </div>
+
+        {/* 底部: 下載 + 返回 */}
+        <div className="p-4 pt-0 flex flex-col gap-2">
+          <button
+            onClick={handleDownload}
+            disabled={isDownloading}
+            className="w-full px-4 py-3 bg-highlight text-black font-bold rounded-[10px] transition-all btn-highlight disabled:opacity-30"
+          >
+            {isDownloading
+              ? "匯出中..."
+              : images.length > 1
+                ? downloadFormat === "pdf"
+                  ? "下載 PDF"
+                  : "下載 ZIP"
+                : "下載圖片"}
+          </button>
+          <button
+            onClick={onReturn}
+            className="w-full px-4 py-2 text-white/70 hover:text-white transition-colors"
+          >
+            返回裁切
+          </button>
         </div>
       </aside>
 
@@ -524,7 +545,6 @@ function OutputSettingsPanel({
   images,
   settings,
   onUpdateSettings,
-  onReturn,
   unifiedOutput,
   onToggleUnified,
   totalEstimatedSize,
@@ -533,8 +553,6 @@ function OutputSettingsPanel({
   onBatchEstimate,
   downloadFormat,
   onDownloadFormatChange,
-  onDownload,
-  isDownloading,
   targetKBScope,
   onTargetKBScopeChange,
   onResetFormat,
@@ -543,7 +561,6 @@ function OutputSettingsPanel({
   images: ImageItem[];
   settings: OutputSettings;
   onUpdateSettings: (updates: Partial<OutputSettings>) => void;
-  onReturn: () => void;
   unifiedOutput: boolean;
   onToggleUnified: () => void;
   totalEstimatedSize: number;
@@ -552,8 +569,6 @@ function OutputSettingsPanel({
   onBatchEstimate: () => void;
   downloadFormat: "image" | "pdf";
   onDownloadFormatChange: (format: "image" | "pdf") => void;
-  onDownload: () => void;
-  isDownloading: boolean;
   targetKBScope: "single" | "all";
   onTargetKBScopeChange: (scope: "single" | "all") => void;
   onResetFormat: () => void;
@@ -565,7 +580,6 @@ function OutputSettingsPanel({
   const [heightError, setHeightError] = useState(false);
 
   const { baseWidth, baseHeight, lockAspectRatio, format } = settings;
-  const isMultiImage = images.length > 1;
 
   // 同步外部 settings 變更到 input (切換圖片時)
   useEffect(() => {
@@ -973,35 +987,6 @@ function OutputSettingsPanel({
         )}
       </div>
 
-      {/* 操作按鈕 */}
-      <div className="flex flex-col gap-2 mt-auto pt-4">
-        <button
-          onClick={onBatchEstimate}
-          disabled={isEstimating}
-          className="w-full px-4 py-2 bg-highlight text-black font-bold rounded-[10px] transition-all btn-highlight disabled:opacity-30"
-        >
-          {isEstimating ? "計算中..." : "估算檔案尺寸"}
-        </button>
-        <button
-          onClick={onDownload}
-          disabled={isDownloading}
-          className="w-full px-4 py-2 text-center text-white/80 hover:text-white border border-white/20 rounded-[10px] transition-colors disabled:opacity-30"
-        >
-          {isDownloading
-            ? "匯出中..."
-            : isMultiImage
-              ? downloadFormat === "pdf"
-                ? "下載 PDF"
-                : "下載 ZIP"
-              : "下載圖片"}
-        </button>
-        <button
-          onClick={onReturn}
-          className="w-full px-4 py-2 text-white/80 hover:text-white transition-colors"
-        >
-          返回裁切
-        </button>
-      </div>
     </div>
   );
 }

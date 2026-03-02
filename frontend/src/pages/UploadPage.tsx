@@ -1,6 +1,7 @@
 import { useState, useCallback, useRef } from "react";
 import type { ImageItem } from "../types";
 import { loadImageFile } from "../utils/loadImageFile";
+import logoImg from "../assets/pic_logo.png";
 
 interface UploadPageProps {
   onImagesLoaded: (images: ImageItem[]) => void;
@@ -69,9 +70,9 @@ export function UploadPage({ onImagesLoaded }: UploadPageProps) {
   );
 
   return (
-    <div className="min-h-screen bg-preview flex flex-col items-center justify-center">
+    <div className="min-h-screen bg-sidebar flex flex-col items-center justify-center">
       <div className="flex flex-col items-center gap-6">
-        <h1 className="text-3xl font-bold text-sidebar">圖片處理工具</h1>
+        <img src={logoImg} alt="picgopic!" className="h-28" />
         <label
           htmlFor="image-upload"
           className="relative flex flex-col items-center cursor-pointer"
@@ -85,7 +86,7 @@ export function UploadPage({ onImagesLoaded }: UploadPageProps) {
             className={`w-[60vw] min-w-[320px] max-w-[720px] h-[50vh] min-h-[200px] max-h-[400px] rounded-2xl border-2 border-dashed flex flex-col items-center justify-center gap-4 transition-all ${
               isDragOver
                 ? "border-highlight bg-highlight/10 scale-[1.02]"
-                : "border-gray-400 hover:border-highlight/60"
+                : "border-gray-400 hover:border-highlight/60 hover:bg-preview/10"
             }`}
           >
             <svg
