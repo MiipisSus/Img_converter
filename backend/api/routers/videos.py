@@ -1,8 +1,8 @@
 """
 影片處理 API 路由
 
-提供影片上傳、資訊查詢、位元率預估與非同步壓縮功能
-壓縮採用 BackgroundTasks 非同步處理，前端透過 polling 查詢進度
+提供影片上傳、資訊查詢、位元率預估與非同步處理功能
+處理採用 BackgroundTasks 非同步處理，前端透過 polling 查詢進度
 """
 
 import asyncio
@@ -23,7 +23,11 @@ from ..schemas.videos import (
     TaskSubmitResponse,
     TaskStatusResponse,
 )
-from backend.services.video_service import VideoService, calculate_bitrate
+from backend.services.video_service import (
+    VideoService,
+    VideoProcessParams,
+    calculate_bitrate,
+)
 
 router = APIRouter(prefix="/videos", tags=["影片處理"])
 
@@ -65,18 +69,19 @@ async def _run_in_executor(fn, *args):
     return await loop.run_in_executor(executor, partial(fn, *args))
 
 
-# ── 背景壓縮任務 ──
+# ── 背景處理任務 ──
 
-def _compress_task(
+def _process_task(
     task_id: str,
     input_path: str,
+    params: VideoProcessParams,
     target_kb: Optional[int],
     output_format: str,
     include_audio: bool,
     quality_preset: str,
 ):
     """
-    在背景執行緒中執行影片壓縮。
+    在背景執行緒中執行影片處理。
     結果寫入暫存檔，路徑記錄在 video_tasks[task_id]。
     """
     task = video_tasks[task_id]
@@ -93,8 +98,9 @@ def _compress_task(
             video_bytes = f.read()
 
         service = VideoService()
-        result_bytes, info = service.compress_video(
+        result_bytes, info = service.process_video(
             video_bytes=video_bytes,
+            params=params,
             target_kb=target_kb,
             output_format=output_format,
             include_audio=include_audio,
@@ -182,20 +188,29 @@ async def estimate_config(
         raise HTTPException(status_code=500, detail=f"預估配置失敗：{str(e)}")
 
 
-# ── 提交壓縮任務 (非同步) ──
+# ── 提交處理任務 (非同步) ──
 
 @router.post(
     "/compress",
     response_model=TaskSubmitResponse,
-    summary="提交壓縮任務",
-    description="上傳影片並提交壓縮任務，立即回傳 task_id，透過 GET /videos/status/{task_id} 查詢進度",
+    summary="提交影片處理任務",
+    description=(
+        "上傳影片並提交處理任務 (裁剪/旋轉/翻轉/縮放/壓縮)。\n"
+        "立即回傳 task_id，透過 GET /videos/status/{task_id} 查詢進度。"
+    ),
 )
 async def submit_compress(
     video: UploadFile = File(..., description="影片檔案"),
     target_kb: Optional[int] = Form(default=None, ge=1, description="目標檔案大小 (KB)"),
     output_format: str = Form(default="mp4", description="輸出格式 (mp4/webm)"),
     include_audio: bool = Form(default=True, description="是否保留音軌"),
-    quality_preset: str = Form(default="slow", description="編碼品質 (ultrafast/fast/medium/slow/veryslow)"),
+    quality_preset: str = Form(default="medium", description="編碼品質 (ultrafast/fast/medium/slow/veryslow)"),
+    # 處理管線參數
+    start_t: Optional[float] = Form(default=None, ge=0, description="起始時間 (秒)"),
+    end_t: Optional[float] = Form(default=None, ge=0, description="結束時間 (秒)"),
+    rotate: int = Form(default=0, description="旋轉角度 (0/90/180/270)"),
+    flip_h: bool = Form(default=False, description="是否水平翻轉"),
+    target_w: Optional[int] = Form(default=None, gt=0, description="目標寬度 (高度按比例縮放)"),
 ):
     _validate_video_extension(video.filename or "")
     video_bytes = await video.read()
@@ -209,17 +224,38 @@ async def submit_compress(
             detail=f"不支援的輸出格式：{output_format}。支援格式：{', '.join(sorted(VideoService.SUPPORTED_OUTPUT_FORMATS))}",
         )
 
-    valid_presets = {"ultrafast", "fast", "medium", "slow", "veryslow"}
+    valid_presets = {"ultrafast", "superfast", "fast", "medium", "slow", "veryslow"}
     if quality_preset not in valid_presets:
         raise HTTPException(
             status_code=400,
             detail=f"不支援的品質預設：{quality_preset}。支援：{', '.join(sorted(valid_presets))}",
         )
 
+    if rotate not in (0, 90, 180, 270):
+        raise HTTPException(
+            status_code=400,
+            detail=f"旋轉角度必須為 0、90、180 或 270，收到：{rotate}",
+        )
+
+    if start_t is not None and end_t is not None and start_t >= end_t:
+        raise HTTPException(
+            status_code=400,
+            detail=f"start_t ({start_t}) 必須小於 end_t ({end_t})",
+        )
+
+    # ── 組裝處理參數 ──
+    params = VideoProcessParams(
+        start_t=start_t,
+        end_t=end_t,
+        rotate=rotate,
+        flip_h=flip_h,
+        target_w=target_w,
+    )
+
     # ── 建立任務 ──
     task_id = uuid.uuid4().hex[:12]
 
-    # 先取得預估配置 (用影片前幾個 bytes 即可算出，快速回傳)
+    # 先取得預估配置
     estimated_config: Dict[str, Any] = {}
     try:
         service = VideoService()
@@ -228,10 +264,17 @@ async def submit_compress(
         height = info["height"]
         has_audio = info["has_audio"] and include_audio
 
+        # 如果有裁剪，用裁剪後時長計算位元率
+        effective_duration = duration
+        if start_t is not None or end_t is not None:
+            t0 = start_t or 0
+            t1 = min(end_t, duration) if end_t is not None else duration
+            effective_duration = max(t1 - t0, 0.01)
+
         if target_kb is not None:
             bc = calculate_bitrate(
                 target_kb=target_kb,
-                duration_sec=duration,
+                duration_sec=effective_duration,
                 include_audio=has_audio,
                 video_height=height,
             )
@@ -239,15 +282,15 @@ async def submit_compress(
             estimated_config["estimated_audio_bitrate_kbps"] = bc.audio_bitrate_kbps
             estimated_config["warning"] = bc.warning
     except Exception:
-        pass  # 預估失敗不影響任務提交
+        pass
 
-    # 將上傳內容寫入暫存檔 (避免把大檔案長期留在記憶體)
+    # 將上傳內容寫入暫存檔
     fd, input_path = tempfile.mkstemp(suffix=".mp4")
     try:
         os.write(fd, video_bytes)
     finally:
         os.close(fd)
-    del video_bytes  # 釋放記憶體
+    del video_bytes
 
     # 註冊任務
     video_tasks[task_id] = {
@@ -259,12 +302,13 @@ async def submit_compress(
         "error": None,
     }
 
-    # 在執行緒池中啟動背景壓縮
+    # 在執行緒池中啟動背景處理
     loop = asyncio.get_event_loop()
     loop.run_in_executor(
         executor,
-        _compress_task,
-        task_id, input_path, target_kb, output_format, include_audio, quality_preset,
+        _process_task,
+        task_id, input_path, params, target_kb,
+        output_format, include_audio, quality_preset,
     )
 
     return TaskSubmitResponse(
@@ -281,8 +325,8 @@ async def submit_compress(
 @router.get(
     "/status/{task_id}",
     response_model=TaskStatusResponse,
-    summary="查詢壓縮任務狀態",
-    description="透過 task_id 查詢壓縮進度，completed 時會附帶 download_url",
+    summary="查詢處理任務狀態",
+    description="透過 task_id 查詢處理進度，completed 時會附帶 download_url",
 )
 async def get_task_status(task_id: str):
     task = video_tasks.get(task_id)
@@ -311,12 +355,12 @@ async def get_task_status(task_id: str):
     return result
 
 
-# ── 下載壓縮結果 ──
+# ── 下載處理結果 ──
 
 @router.get(
     "/download/{task_id}",
-    summary="下載壓縮後的影片",
-    description="任務完成後，透過此端點下載壓縮後的影片檔案",
+    summary="下載處理後的影片",
+    description="任務完成後，透過此端點下載處理後的影片檔案",
     responses={
         200: {"content": {"video/mp4": {}, "video/webm": {}}},
         404: {"description": "任務不存在或尚未完成"},
@@ -339,7 +383,7 @@ async def download_result(task_id: str):
 
     fmt = task.get("output_format", "mp4")
     mime = FORMAT_TO_MIME.get(fmt, "video/mp4")
-    filename = f"compressed.{fmt}"
+    filename = f"processed.{fmt}"
 
     return FileResponse(
         path=output_path,
@@ -349,7 +393,7 @@ async def download_result(task_id: str):
     )
 
 
-# ── 清理已完成的任務 (可選) ──
+# ── 清理已完成的任務 ──
 
 @router.delete(
     "/tasks/{task_id}",
@@ -364,7 +408,6 @@ async def cleanup_task(task_id: str):
     if task["status"] == "processing":
         raise HTTPException(status_code=400, detail="無法刪除正在處理中的任務")
 
-    # 清理暫存檔
     output_path = task.get("output_path")
     if output_path and os.path.exists(output_path):
         os.unlink(output_path)

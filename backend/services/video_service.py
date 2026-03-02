@@ -1,14 +1,14 @@
 """
 影片處理服務模組
 
-提供影片壓縮、位元率計算與格式轉換功能
+提供影片壓縮、位元率計算、裁剪、旋轉、翻轉與格式轉換功能
 使用 MoviePy + FFmpeg 進行影片處理
 """
 
 import os
 import tempfile
 from typing import Optional, Tuple, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from concurrent.futures import ThreadPoolExecutor
 
 
@@ -23,6 +23,22 @@ class BitrateConfig:
     target_kb: int
     duration_sec: float
     warning: Optional[str] = None
+
+
+# ── 影片處理參數 ──
+
+@dataclass
+class VideoProcessParams:
+    """影片處理管線參數"""
+    # 時間裁剪
+    start_t: Optional[float] = None
+    end_t: Optional[float] = None
+    # 旋轉 (0, 90, 180, 270)
+    rotate: int = 0
+    # 水平翻轉
+    flip_h: bool = False
+    # 目標寬度 (高度按比例縮放，自動對齊偶數)
+    target_w: Optional[int] = None
 
 
 # ── 解析度對應位元率上限 (kbps) ──
@@ -93,18 +109,17 @@ def calculate_bitrate(
     )
 
 
+def _ensure_even(n: int) -> int:
+    """確保數值為偶數 (H.264 要求)"""
+    return n if n % 2 == 0 else n + 1
+
+
 # ── 進度追蹤 Logger ──
 
 class _ProgressLogger:
     """
     自訂 proglog logger，攔截 MoviePy 的進度更新。
-
-    MoviePy 2.x 的 write_videofile(logger=) 接受：
-    - None (靜默)
-    - "bar" (tqdm 進度條)
-    - 自訂 ProgressBarLogger 實例
-
-    我們繼承 ProgressBarLogger，覆寫 bars_callback 來追蹤 t (已處理秒數)。
+    覆寫 bars_callback 來追蹤 t (已處理秒數)。
     """
 
     def __init__(self, duration: float, on_progress: Optional[Callable[[int], None]] = None):
@@ -157,33 +172,82 @@ class VideoService:
         finally:
             os.unlink(tmp_path)
 
-    def compress_video(
+    def process_video(
         self,
         video_bytes: bytes,
+        params: Optional[VideoProcessParams] = None,
         target_kb: Optional[int] = None,
         output_format: str = "mp4",
         include_audio: bool = True,
-        quality_preset: str = "slow",
+        quality_preset: str = "medium",
         on_progress: Optional[Callable[[int], None]] = None,
     ) -> Tuple[bytes, dict]:
         """
-        壓縮影片至目標大小
+        影片處理管線：裁剪 → 旋轉 → 翻轉 → 縮放 → 編碼
+
+        處理順序嚴格遵循：
+        1. subclip (裁剪時間) — 先做以減少後續處理量
+        2. rotate (旋轉) — 含 expand=True 自動調整畫布
+        3. mirror_x (水平翻轉)
+        4. resize (縮放) — 最後做，確保最終尺寸正確
+        5. even_size — H.264 要求偶數解析度
 
         Args:
             video_bytes: 原始影片位元組
+            params: 處理參數 (裁剪/旋轉/翻轉/縮放)
             target_kb: 目標檔案大小 (KB)，None 表示不限制
             output_format: 輸出格式 (mp4/webm)
             include_audio: 是否保留音軌
-            quality_preset: FFmpeg preset
-            on_progress: 進度回調 fn(percent: int)，0-99 為首次壓制，100 = 完成
+            quality_preset: FFmpeg preset (ultrafast/fast/medium/slow)
+            on_progress: 進度回調 fn(percent: int)
         """
         from moviepy import VideoFileClip
+        from moviepy.video.fx import Rotate, MirrorX, Resize, EvenSize
+
+        if params is None:
+            params = VideoProcessParams()
 
         tmp_input = self._write_temp(video_bytes, suffix=".mp4")
         tmp_output = tempfile.mktemp(suffix=f".{output_format}")
 
         try:
             clip = VideoFileClip(tmp_input)
+            original_duration = clip.duration
+            warnings: list[str] = []
+
+            # ── 步驟 1: 時間裁剪 (最先執行以節省後續處理時間) ──
+            start_t = params.start_t
+            end_t = params.end_t
+
+            if end_t is not None and end_t > original_duration:
+                end_t = original_duration
+                warnings.append(f"end_t 已自動修正為影片總時長 {original_duration}s")
+
+            if start_t is not None or end_t is not None:
+                clip = clip.subclipped(
+                    start_time=start_t or 0,
+                    end_time=end_t,
+                )
+
+            # ── 步驟 2: 旋轉 (expand=True 避免黑邊) ──
+            if params.rotate and params.rotate != 0:
+                clip = clip.with_effects([
+                    Rotate(angle=params.rotate, expand=True),
+                ])
+
+            # ── 步驟 3: 水平翻轉 ──
+            if params.flip_h:
+                clip = clip.with_effects([MirrorX()])
+
+            # ── 步驟 4: 縮放 ──
+            if params.target_w is not None:
+                tw = _ensure_even(params.target_w)
+                clip = clip.with_effects([Resize(width=tw)])
+
+            # ── 步驟 5: 確保偶數解析度 (H.264 硬性要求) ──
+            clip = clip.with_effects([EvenSize()])
+
+            # 處理後的資訊
             duration = clip.duration
             width = clip.size[0]
             height = clip.size[1]
@@ -207,6 +271,8 @@ class VideoService:
                     "-maxrate", video_br,
                     "-bufsize", f"{bitrate_config.video_bitrate_kbps * 2}k",
                 ])
+                if bitrate_config.warning:
+                    warnings.append(bitrate_config.warning)
             else:
                 video_br = None
                 audio_br = "128k" if has_audio else None
@@ -220,8 +286,10 @@ class VideoService:
             write_kwargs = {
                 "codec": codec,
                 "audio": has_audio,
+                "audio_codec": "aac" if has_audio else None,
                 "ffmpeg_params": ffmpeg_params,
                 "logger": progress_logger.logger,
+                "threads": 4,
             }
             if audio_br and has_audio:
                 write_kwargs["audio_bitrate"] = audio_br
@@ -240,15 +308,15 @@ class VideoService:
             # ── 二次壓制 (若超出目標) ──
             if target_kb is not None and result_size_kb > target_kb:
                 result_bytes, result_size_kb = self._second_pass(
-                    tmp_input, output_format,
+                    tmp_input, params, output_format,
                     target_kb, duration, height, has_audio,
                     quality_preset, on_progress,
                 )
 
-            # 通知完成
             if on_progress:
                 on_progress(100)
 
+            warning_str = "；".join(warnings) if warnings else None
             info = {
                 "original_size_kb": round(len(video_bytes) / 1024, 1),
                 "output_size_kb": round(result_size_kb, 1),
@@ -257,7 +325,7 @@ class VideoService:
                 "height": height,
                 "video_bitrate_kbps": bitrate_config.video_bitrate_kbps if bitrate_config else None,
                 "audio_bitrate_kbps": bitrate_config.audio_bitrate_kbps if bitrate_config else None,
-                "warning": bitrate_config.warning if bitrate_config else None,
+                "warning": warning_str,
             }
 
             return result_bytes, info
@@ -318,6 +386,7 @@ class VideoService:
     def _second_pass(
         self,
         tmp_input: str,
+        params: VideoProcessParams,
         output_format: str,
         target_kb: int,
         duration: float,
@@ -326,8 +395,9 @@ class VideoService:
         quality_preset: str,
         on_progress: Optional[Callable[[int], None]] = None,
     ) -> Tuple[bytes, float]:
-        """二次壓制：以 0.9 係數降低位元率重新壓縮"""
+        """二次壓制：以 0.9 係數降低位元率重新壓縮 (含完整處理管線)"""
         from moviepy import VideoFileClip
+        from moviepy.video.fx import Rotate, MirrorX, Resize, EvenSize
 
         reduced_target = int(target_kb * 0.9)
         config = calculate_bitrate(
@@ -353,12 +423,30 @@ class VideoService:
         tmp_output_2 = tempfile.mktemp(suffix=f".{output_format}")
         try:
             clip = VideoFileClip(tmp_input)
+
+            # 重新套用處理管線
+            if params.start_t is not None or params.end_t is not None:
+                clip = clip.subclipped(
+                    start_time=params.start_t or 0,
+                    end_time=params.end_t,
+                )
+            if params.rotate and params.rotate != 0:
+                clip = clip.with_effects([Rotate(angle=params.rotate, expand=True)])
+            if params.flip_h:
+                clip = clip.with_effects([MirrorX()])
+            if params.target_w is not None:
+                tw = _ensure_even(params.target_w)
+                clip = clip.with_effects([Resize(width=tw)])
+            clip = clip.with_effects([EvenSize()])
+
             write_kwargs = {
                 "codec": codec,
                 "audio": has_audio,
+                "audio_codec": "aac" if has_audio else None,
                 "ffmpeg_params": ffmpeg_params,
                 "logger": progress_logger.logger,
                 "bitrate": video_br,
+                "threads": 4,
             }
             if audio_br and has_audio:
                 write_kwargs["audio_bitrate"] = audio_br
