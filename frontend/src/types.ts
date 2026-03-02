@@ -2,6 +2,14 @@ import type { EditorState, ImageInfo } from "./hooks/useImageEditor";
 
 export type AppStep = "upload" | "edit" | "export";
 
+/** 影片項目 */
+export interface VideoItem {
+  id: string;
+  file: File;
+  name: string;
+  size: number;
+}
+
 /** 調整尺寸狀態 */
 export interface ResizeState {
   active: boolean;
