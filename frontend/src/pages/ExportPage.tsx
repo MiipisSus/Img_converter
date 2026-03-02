@@ -66,9 +66,11 @@ export function ExportPage({
   const { pipelineState } = activeImage;
   const imageSrc = activeImage.src;
 
-  // ── activeImageId ref (供 callback 中即時讀取) ──
+  // ── refs (供 callback 中即時讀取，避免 stale closure) ──
   const activeImageIdRef = useRef(activeImageId);
   activeImageIdRef.current = activeImageId;
+  const imagesRef = useRef(images);
+  imagesRef.current = images;
 
   // ── 輸出設定 (local state) ──
   const [outputSettings, setOutputSettings] = useState<OutputSettings>(() => {
@@ -186,6 +188,8 @@ export function ExportPage({
       }
       return !prev;
     });
+    // 統一輸出切換會改變所有圖片的格式/品質，重新估算
+    setTimeout(() => handleBatchEstimateRef.current(), 0);
   }, [broadcastFormatQuality, handleSetTargetKBScope]);
 
   // ── 重置匯出格式 ──
@@ -265,22 +269,24 @@ export function ExportPage({
   const hasRealSizes = Object.keys(realSizes).length === images.length;
 
   // 批量預估：為所有圖片生成 blob 以取得精確大小 (含 targetKB 二分搜尋)
+  // 所有外部狀態皆從 ref 讀取，避免 setTimeout 觸發時的 stale closure
   const handleBatchEstimate = async () => {
     if (isEstimating) return;
     setIsEstimating(true);
     try {
       const os = outputSettingsRef.current;
+      const imgs = imagesRef.current;
       const hasLimit = os.enableTargetKB && os.targetKB;
       let targetBytes: number | null = null;
       if (hasLimit) {
         const totalBytes = os.targetKB! * 1024;
         targetBytes =
           targetKBScopeRef.current === "all"
-            ? Math.floor(totalBytes / images.length)
+            ? Math.floor(totalBytes / imgs.length)
             : totalBytes;
       }
       const newRealSizes: Record<string, number> = {};
-      for (const img of images) {
+      for (const img of imgs) {
         const cs = getCroppedOriginalSize(
           img.pipelineState.editorState,
           img.pipelineState.imageInfo,
@@ -318,7 +324,8 @@ export function ExportPage({
     if (isDownloading) return;
     setIsDownloading(true);
     try {
-      const isMulti = images.length > 1;
+      const imgs = imagesRef.current;
+      const isMulti = imgs.length > 1;
       const os = outputSettingsRef.current;
       const hasLimit = os.enableTargetKB && os.targetKB;
       let targetBytes: number | null = null;
@@ -326,18 +333,18 @@ export function ExportPage({
         const totalBytes = os.targetKB! * 1024;
         targetBytes =
           targetKBScopeRef.current === "all"
-            ? Math.floor(totalBytes / images.length)
+            ? Math.floor(totalBytes / imgs.length)
             : totalBytes;
       }
 
       // 為所有圖片即時生成 blob (帶正確的格式/品質/尺寸，含 targetKB 限制)
       const allResults = await Promise.all(
-        images.map(async (img) => {
+        imgs.map(async (img) => {
           const cs = getCroppedOriginalSize(
             img.pipelineState.editorState,
             img.pipelineState.imageInfo,
           );
-          const isActive = img.id === activeImageId;
+          const isActive = img.id === activeImageIdRef.current;
           const tw = isActive
             ? os.targetWidth
             : (img.pipelineState.resize.targetWidth || cs.width);
