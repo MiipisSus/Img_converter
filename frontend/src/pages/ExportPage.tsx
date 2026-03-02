@@ -235,7 +235,7 @@ export function ExportPage({
       const cs = getCroppedOriginalSize(img.pipelineState.editorState, img.pipelineState.imageInfo);
       const w = img.pipelineState.resize.targetWidth || cs.width;
       const h = img.pipelineState.resize.targetHeight || cs.height;
-      const { fmt } = resolveFormat(img.exportFormat ?? outputSettings.format, img.originalMimeType);
+      const { fmt } = resolveFormat(img.exportFormat ?? outputSettings.format);
       sizes[img.id] = estimateFileSize(
         w, h,
         fmt,
@@ -287,7 +287,7 @@ export function ExportPage({
         );
         const tw = img.pipelineState.resize.targetWidth || cs.width;
         const th = img.pipelineState.resize.targetHeight || cs.height;
-        const { mime } = resolveFormat(img.exportFormat ?? os.format, img.originalMimeType);
+        const { mime } = resolveFormat(img.exportFormat ?? os.format);
         const q = (img.exportQuality ?? os.quality) / 100;
 
         const blob = await generateImageBlobWithLimit(img, tw, th, mime, q, targetBytes);
@@ -344,7 +344,7 @@ export function ExportPage({
           const th = isActive
             ? os.targetHeight
             : (img.pipelineState.resize.targetHeight || cs.height);
-          const { fmt, mime } = resolveFormat(img.exportFormat ?? os.format, img.originalMimeType);
+          const { fmt, mime } = resolveFormat(img.exportFormat ?? os.format);
           const q = (img.exportQuality ?? os.quality) / 100;
 
           const blob = await generateImageBlobWithLimit(img, tw, th, mime, q, targetBytes);
@@ -800,8 +800,8 @@ function OutputSettingsPanel({
         </div>
 
         <div className="flex gap-2 mb-3">
-          {(["original", "png", "jpeg", "webp"] as const).map((fmt) => {
-            const label = fmt === "original" ? "原始" : fmt.toUpperCase();
+          {(["png", "jpeg", "webp"] as const).map((fmt) => {
+            const label = fmt.toUpperCase();
             return (
               <button
                 key={fmt}
@@ -820,10 +820,6 @@ function OutputSettingsPanel({
             );
           })}
         </div>
-
-        {format === "original" && (
-          <p className="text-xs text-white/60 mb-3">保留上傳時的檔案類型</p>
-        )}
 
         {format === "png" && (
           <p className="text-xs text-white/60 mb-3">PNG 為無損格式，不支援品質調整</p>
@@ -1011,21 +1007,12 @@ function OutputSettingsPanel({
 // Helpers
 // ============================================================
 
-/**
- * 將 ExportFormat (含 "original") 解析為圖片實際的 format/mime。
- * Canvas toBlob 僅支援 png/jpeg/webp，其餘原始格式 fallback 為 png。
- */
+/** 將 ExportFormat 解析為圖片實際的 format/mime */
 function resolveFormat(
   format: ExportFormat,
-  originalMimeType: string,
 ): { fmt: "png" | "jpeg" | "webp"; mime: "image/png" | "image/jpeg" | "image/webp" } {
-  if (format !== "original") {
-    const mime = format === "png" ? "image/png" : format === "jpeg" ? "image/jpeg" : "image/webp";
-    return { fmt: format, mime };
-  }
-  if (originalMimeType === "image/jpeg") return { fmt: "jpeg", mime: "image/jpeg" };
-  if (originalMimeType === "image/webp") return { fmt: "webp", mime: "image/webp" };
-  return { fmt: "png", mime: "image/png" };
+  const mime = format === "png" ? "image/png" : format === "jpeg" ? "image/jpeg" : "image/webp";
+  return { fmt: format, mime };
 }
 
 /** 數學公式估算檔案大小 (bytes) */

@@ -27,7 +27,7 @@ export interface PipelineState {
 }
 
 /** 匯出格式類型 (含原始格式) */
-export type ExportFormat = "png" | "jpeg" | "webp" | "original";
+export type ExportFormat = "png" | "jpeg" | "webp";
 
 /** 多圖管理的單一圖片項目 */
 export interface ImageItem {
