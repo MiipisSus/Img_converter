@@ -60,6 +60,13 @@ function App() {
     [],
   );
 
+  // 追加圖片 (EditorPage 使用)
+  const handleAppendImages = useCallback((newImages: ImageItem[]) => {
+    if (newImages.length === 0) return;
+    setImages((prev) => [...prev, ...newImages]);
+    setActiveImageId(newImages[0].id);
+  }, []);
+
   // 選擇圖片
   const handleSelectImage = useCallback((id: string) => {
     setActiveImageId(id);
@@ -91,6 +98,7 @@ function App() {
           activeImageId={activeImageId}
           onSelectImage={handleSelectImage}
           onUpdateImage={handleUpdateImage}
+          onAppendImages={handleAppendImages}
           imageRef={imageRef}
           setPipelineState={setPipelineState}
           onExport={handleExport}
@@ -105,8 +113,6 @@ function App() {
           images={images}
           activeImageId={activeImageId}
           onSelectImage={handleSelectImage}
-          imageRef={imageRef}
-          setPipelineState={setPipelineState}
           setImages={setImages}
           onReturn={handleReturnToEdit}
         />

@@ -3,14 +3,12 @@ import { PreviewWorkspace } from "../components/PreviewWorkspace";
 import { DarkEditableNumber } from "../components/DarkEditableNumber";
 import { generateCroppedImage } from "../utils/generateCroppedImage";
 import { getCroppedOriginalSize } from "../utils/containerParams";
-import type { PipelineState, OutputSettings, ImageItem } from "../types";
+import type { OutputSettings, ImageItem } from "../types";
 
 interface ExportPageProps {
   images: ImageItem[];
   activeImageId: string;
   onSelectImage: (id: string) => void;
-  imageRef: React.MutableRefObject<HTMLImageElement | null>;
-  setPipelineState: React.Dispatch<React.SetStateAction<PipelineState | null>>;
   setImages: React.Dispatch<React.SetStateAction<ImageItem[]>>;
   onReturn: () => void;
 }
@@ -19,12 +17,9 @@ export function ExportPage({
   images,
   activeImageId,
   onSelectImage,
-  imageRef,
-  setPipelineState,
   setImages,
   onReturn,
 }: ExportPageProps) {
-  const [isExporting, setIsExporting] = useState(false);
   const [unifiedOutput, setUnifiedOutput] = useState(true);
   const unifiedOutputRef = useRef(unifiedOutput);
   unifiedOutputRef.current = unifiedOutput;
@@ -142,93 +137,155 @@ export function ExportPage({
     });
   }, [broadcastFormatQuality]);
 
-  // ── 套用輸出設定並生成最終圖片 ──
-  const handleApplyOutput = async () => {
-    if (!imageRef.current || isExporting) return;
-
-    setIsExporting(true);
-    try {
-      const { editorState, imageInfo } = pipelineState;
-      const { targetWidth, targetHeight, format, quality, enableTargetKB, targetKB } =
-        outputSettings;
-
-      const mimeType =
-        format === "png" ? "image/png" : format === "jpeg" ? "image/jpeg" : "image/webp";
-
-      let result: Awaited<ReturnType<typeof generateCroppedImage>>;
-      let finalQuality = quality / 100;
-
-      if (enableTargetKB && targetKB && format !== "png") {
-        const targetBytes = targetKB * 1024;
-        let minQ = 0.1;
-        let maxQ = 1.0;
-        let attempts = 0;
-
-        result = await generateCroppedImage(imageRef.current, editorState, imageInfo, {
-          targetWidth,
-          targetHeight,
-          format: mimeType,
-          quality: maxQ,
-        });
-
-        if (result.blob.size <= targetBytes) {
-          finalQuality = maxQ;
-        } else {
-          while (attempts < 10 && maxQ - minQ > 0.02) {
-            const midQ = (minQ + maxQ) / 2;
-            result = await generateCroppedImage(imageRef.current, editorState, imageInfo, {
-              targetWidth,
-              targetHeight,
-              format: mimeType,
-              quality: midQ,
-            });
-            if (result.blob.size > targetBytes) maxQ = midQ;
-            else minQ = midQ;
-            attempts++;
-          }
-          finalQuality = minQ;
-          result = await generateCroppedImage(imageRef.current, editorState, imageInfo, {
-            targetWidth,
-            targetHeight,
-            format: mimeType,
-            quality: finalQuality,
-          });
-        }
-      } else {
-        result = await generateCroppedImage(imageRef.current, editorState, imageInfo, {
-          targetWidth,
-          targetHeight,
-          format: mimeType,
-          quality: finalQuality,
-        });
-      }
-
-      setPipelineState((prev) => ({
-        ...prev!,
-        previewUrl: result.dataUrl,
-        previewBlob: result.blob,
-        outputWidth: result.width,
-        outputHeight: result.height,
-      }));
-
-      setOutputSettings((prev) => ({
-        ...prev,
-        lastExportSize: result.blob.size,
-      }));
-
-      console.log(
-        "輸出尺寸:",
-        result.width,
-        "×",
-        result.height,
-        "檔案大小:",
-        (result.blob.size / 1024).toFixed(1),
-        "KB",
+  // ── 檔案大小預估 ──
+  const mathEstimates = useMemo(() => {
+    const sizes: Record<string, number> = {};
+    for (const img of images) {
+      const cs = getCroppedOriginalSize(img.pipelineState.editorState, img.pipelineState.imageInfo);
+      const w = img.pipelineState.resize.targetWidth || cs.width;
+      const h = img.pipelineState.resize.targetHeight || cs.height;
+      sizes[img.id] = estimateFileSize(
+        w, h,
+        img.exportFormat ?? outputSettings.format,
+        img.exportQuality ?? outputSettings.quality,
       );
-    } catch (error) {
-      console.error("套用輸出設定失敗:", error);
+    }
+    return sizes;
+  }, [images, outputSettings.format, outputSettings.quality]);
+
+  const [realSizes, setRealSizes] = useState<Record<string, number>>({});
+  const [isEstimating, setIsEstimating] = useState(false);
+
+  // 當格式/品質變更時，清除過期的真實大小
+  useEffect(() => {
+    setRealSizes((prev) => (Object.keys(prev).length > 0 ? {} : prev));
+  }, [outputSettings.format, outputSettings.quality]);
+
+  // 合併：真實大小優先，否則使用數學估算
+  const displaySizes = useMemo(
+    () => ({ ...mathEstimates, ...realSizes }),
+    [mathEstimates, realSizes],
+  );
+  const totalEstimatedSize = useMemo(
+    () => images.reduce((sum, img) => sum + (displaySizes[img.id] ?? 0), 0),
+    [images, displaySizes],
+  );
+  const hasRealSizes = Object.keys(realSizes).length === images.length;
+
+  // 批量預估：為所有圖片生成 blob 以取得精確大小 (含 targetKB 二分搜尋)
+  const handleBatchEstimate = async () => {
+    if (isEstimating) return;
+    setIsEstimating(true);
+    try {
+      const targetBytes =
+        outputSettings.enableTargetKB && outputSettings.targetKB
+          ? outputSettings.targetKB * 1024
+          : null;
+      const newRealSizes: Record<string, number> = {};
+      for (const img of images) {
+        const cs = getCroppedOriginalSize(
+          img.pipelineState.editorState,
+          img.pipelineState.imageInfo,
+        );
+        const tw = img.pipelineState.resize.targetWidth || cs.width;
+        const th = img.pipelineState.resize.targetHeight || cs.height;
+        const fmt = img.exportFormat ?? outputSettings.format;
+        const q = (img.exportQuality ?? outputSettings.quality) / 100;
+        const mime =
+          fmt === "png" ? "image/png" : fmt === "jpeg" ? "image/jpeg" : "image/webp";
+
+        const blob = await generateImageBlobWithLimit(img, tw, th, mime, q, targetBytes);
+        newRealSizes[img.id] = blob.size;
+      }
+      setRealSizes(newRealSizes);
+    } catch (err) {
+      console.error("批量預估失敗:", err);
     } finally {
-      setIsExporting(false);
+      setIsEstimating(false);
+    }
+  };
+
+  // ── 下載邏輯 (即時生成 blob，帶正確輸出格式) ──
+  const [downloadFormat, setDownloadFormat] = useState<"image" | "pdf">("image");
+  const [isDownloading, setIsDownloading] = useState(false);
+
+  const handleDownload = async () => {
+    if (isDownloading) return;
+    setIsDownloading(true);
+    try {
+      const isMulti = images.length > 1;
+      const targetBytes =
+        outputSettings.enableTargetKB && outputSettings.targetKB
+          ? outputSettings.targetKB * 1024
+          : null;
+
+      // 為所有圖片即時生成 blob (帶正確的格式/品質/尺寸，含 targetKB 限制)
+      const allResults = await Promise.all(
+        images.map(async (img) => {
+          const cs = getCroppedOriginalSize(
+            img.pipelineState.editorState,
+            img.pipelineState.imageInfo,
+          );
+          const isActive = img.id === activeImageId;
+          const tw = isActive
+            ? outputSettings.targetWidth
+            : (img.pipelineState.resize.targetWidth || cs.width);
+          const th = isActive
+            ? outputSettings.targetHeight
+            : (img.pipelineState.resize.targetHeight || cs.height);
+          const fmt = img.exportFormat ?? outputSettings.format;
+          const q = (img.exportQuality ?? outputSettings.quality) / 100;
+          const mime =
+            fmt === "png" ? "image/png" : fmt === "jpeg" ? "image/jpeg" : "image/webp";
+
+          const blob = await generateImageBlobWithLimit(img, tw, th, mime, q, targetBytes);
+          return { blob, ext: fmt };
+        }),
+      );
+
+      console.log("Sending images count:", allResults.length);
+
+      if (!isMulti && downloadFormat === "image") {
+        // 單圖直接下載
+        const { blob, ext } = allResults[0];
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `processed-image.${ext}`;
+        a.click();
+        URL.revokeObjectURL(url);
+      } else if (downloadFormat === "image") {
+        // 多圖 ZIP
+        const JSZip = (await import("jszip")).default;
+        const zip = new JSZip();
+        allResults.forEach(({ blob, ext }, i) => {
+          zip.file(`image-${i + 1}.${ext}`, blob);
+        });
+        const zipBlob = await zip.generateAsync({ type: "blob" });
+        const url = URL.createObjectURL(zipBlob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = "images.zip";
+        a.click();
+        URL.revokeObjectURL(url);
+      } else {
+        // PDF
+        const { exportPdf } = await import("../api/exportPdf");
+        const pdfBlob = await exportPdf(
+          allResults.map((r) => r.blob),
+          "export.pdf",
+        );
+        const url = URL.createObjectURL(pdfBlob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = "export.pdf";
+        a.click();
+        URL.revokeObjectURL(url);
+      }
+    } catch (err) {
+      console.error("匯出失敗:", err);
+    } finally {
+      setIsDownloading(false);
     }
   };
 
@@ -251,13 +308,17 @@ export function ExportPage({
             images={images}
             settings={outputSettings}
             onUpdateSettings={handleUpdateOutputSettings}
-            onApply={handleApplyOutput}
             onReturn={onReturn}
-            isExporting={isExporting}
-            previewUrl={pipelineState.previewUrl}
-            previewBlob={pipelineState.previewBlob}
             unifiedOutput={unifiedOutput}
             onToggleUnified={handleToggleUnified}
+            totalEstimatedSize={totalEstimatedSize}
+            hasRealSizes={hasRealSizes}
+            isEstimating={isEstimating}
+            onBatchEstimate={handleBatchEstimate}
+            downloadFormat={downloadFormat}
+            onDownloadFormatChange={setDownloadFormat}
+            onDownload={handleDownload}
+            isDownloading={isDownloading}
           />
         </div>
       </aside>
@@ -276,7 +337,7 @@ export function ExportPage({
             imageInfo={null}
             originalSrc={imageSrc}
             previewUrl={pipelineState.previewUrl}
-            isProcessing={isExporting}
+            isProcessing={false}
             mode="output"
             outputWidth={pipelineState.outputWidth}
             outputHeight={pipelineState.outputHeight}
@@ -290,38 +351,46 @@ export function ExportPage({
         {images.length > 1 && (
           <div className="h-[120px] shrink-0 w-full overflow-x-auto thumbnail-scroll px-5 py-2.5 flex items-center gap-3">
             {images.map((item) => (
-              <button
-                key={item.id}
-                onClick={() => onSelectImage(item.id)}
-                className={`relative shrink-0 w-16 h-16 rounded-lg overflow-hidden border-2 transition-colors ${
-                  item.id === activeImageId
-                    ? "border-highlight"
-                    : "border-transparent hover:border-white/30"
-                }`}
-              >
-                <img
-                  src={item.pipelineState.previewUrl ?? item.src}
-                  className="w-full h-full object-cover"
-                  alt=""
-                />
-                {unifiedOutput && item.id !== activeImageId && (
-                  <div className="absolute top-0.5 right-0.5 bg-black/50 rounded-full p-0.5">
-                    <svg
-                      className="w-3.5 h-3.5"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="#D4FF3F"
-                      strokeWidth={2.5}
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"
-                      />
-                    </svg>
-                  </div>
-                )}
-              </button>
+              <div key={item.id} className="flex flex-col items-center gap-1 shrink-0">
+                <button
+                  onClick={() => onSelectImage(item.id)}
+                  className={`relative shrink-0 w-16 h-16 rounded-lg overflow-hidden border-2 transition-colors ${
+                    item.id === activeImageId
+                      ? "border-highlight"
+                      : "border-transparent hover:border-white/30"
+                  }`}
+                >
+                  <img
+                    src={item.pipelineState.previewUrl ?? item.src}
+                    className="w-full h-full object-cover"
+                    alt=""
+                  />
+                  {unifiedOutput && item.id !== activeImageId && (
+                    <div className="absolute top-0.5 right-0.5 bg-black/50 rounded-full p-0.5">
+                      <svg
+                        className="w-3.5 h-3.5"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="#D4FF3F"
+                        strokeWidth={2.5}
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"
+                        />
+                      </svg>
+                    </div>
+                  )}
+                </button>
+                <span className="text-[10px] text-white/50 font-mono whitespace-nowrap">
+                  {isEstimating ? (
+                    <span className="animate-pulse">...</span>
+                  ) : (
+                    formatFileSize(displaySizes[item.id] ?? 0)
+                  )}
+                </span>
+              </div>
             ))}
           </div>
         )}
@@ -339,32 +408,37 @@ function OutputSettingsPanel({
   images,
   settings,
   onUpdateSettings,
-  onApply,
   onReturn,
-  isExporting,
-  previewUrl,
-  previewBlob,
   unifiedOutput,
   onToggleUnified,
+  totalEstimatedSize,
+  hasRealSizes,
+  isEstimating,
+  onBatchEstimate,
+  downloadFormat,
+  onDownloadFormatChange,
+  onDownload,
+  isDownloading,
 }: {
   images: ImageItem[];
   settings: OutputSettings;
   onUpdateSettings: (updates: Partial<OutputSettings>) => void;
-  onApply: () => void;
   onReturn: () => void;
-  isExporting: boolean;
-  previewUrl: string | null;
-  previewBlob: Blob | null;
   unifiedOutput: boolean;
   onToggleUnified: () => void;
+  totalEstimatedSize: number;
+  hasRealSizes: boolean;
+  isEstimating: boolean;
+  onBatchEstimate: () => void;
+  downloadFormat: "image" | "pdf";
+  onDownloadFormatChange: (format: "image" | "pdf") => void;
+  onDownload: () => void;
+  isDownloading: boolean;
 }) {
   const [widthInput, setWidthInput] = useState(String(settings.targetWidth));
   const [heightInput, setHeightInput] = useState(String(settings.targetHeight));
   const [widthError, setWidthError] = useState(false);
   const [heightError, setHeightError] = useState(false);
-
-  const [isBatchExporting, setIsBatchExporting] = useState(false);
-  const [downloadFormat, setDownloadFormat] = useState<"image" | "pdf">("image");
 
   const { baseWidth, baseHeight, lockAspectRatio, format } = settings;
   const isMultiImage = images.length > 1;
@@ -374,77 +448,6 @@ function OutputSettingsPanel({
     setWidthInput(String(settings.targetWidth));
     setHeightInput(String(settings.targetHeight));
   }, [settings.targetWidth, settings.targetHeight]);
-
-  // 下載處理
-  const handleDownload = async () => {
-    if (isBatchExporting) return;
-
-    // 單圖 + 圖片格式：直接下載
-    if (!isMultiImage && downloadFormat === "image") {
-      if (!previewUrl) return;
-      const a = document.createElement("a");
-      a.href = previewUrl;
-      a.download = `processed-image.${format}`;
-      a.click();
-      return;
-    }
-
-    // 多圖 + 圖片格式：ZIP 壓縮下載
-    if (isMultiImage && downloadFormat === "image") {
-      const blobs: { blob: Blob; ext: string; index: number }[] = [];
-      images.forEach((img, i) => {
-        if (img.pipelineState.previewBlob) {
-          blobs.push({ blob: img.pipelineState.previewBlob, ext: img.exportFormat ?? format, index: i });
-        }
-      });
-      if (blobs.length === 0) return;
-
-      setIsBatchExporting(true);
-      try {
-        const JSZip = (await import("jszip")).default;
-        const zip = new JSZip();
-        for (const { blob, ext, index } of blobs) {
-          zip.file(`image-${index + 1}.${ext}`, blob);
-        }
-        const zipBlob = await zip.generateAsync({ type: "blob" });
-        const url = URL.createObjectURL(zipBlob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = "images.zip";
-        a.click();
-        URL.revokeObjectURL(url);
-      } catch (err) {
-        console.error("ZIP 匯出失敗:", err);
-      } finally {
-        setIsBatchExporting(false);
-      }
-      return;
-    }
-
-    // PDF 格式：收集所有圖片 blob 匯出 PDF
-    if (downloadFormat === "pdf") {
-      const allBlobs = images
-        .map((img) => img.pipelineState.previewBlob)
-        .filter((b): b is Blob => b !== null);
-      if (allBlobs.length === 0) return;
-
-      setIsBatchExporting(true);
-      try {
-        const { exportPdf } = await import("../api/exportPdf");
-        const pdfBlob = await exportPdf(allBlobs, "export.pdf");
-        const url = URL.createObjectURL(pdfBlob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = "export.pdf";
-        a.click();
-        URL.revokeObjectURL(url);
-      } catch (err) {
-        console.error("PDF 匯出失敗:", err);
-      } finally {
-        setIsBatchExporting(false);
-      }
-    }
-  };
 
   // 處理寬度輸入變更 (僅影響當前圖片)
   const handleWidthInputChange = (value: string) => {
@@ -526,7 +529,7 @@ function OutputSettingsPanel({
           ).map(([val, label]) => (
             <button
               key={val}
-              onClick={() => setDownloadFormat(val)}
+              onClick={() => onDownloadFormatChange(val)}
               className={`flex-1 px-2 py-1.5 text-sm rounded-[10px] transition-colors ${
                 downloadFormat === val
                   ? "bg-highlight text-black font-medium"
@@ -763,31 +766,48 @@ function OutputSettingsPanel({
         )}
       </div>
 
+      {/* 預估總檔案大小 */}
+      <div className="text-sm text-center font-mono p-2 bg-white/5 rounded-[10px]">
+        <span className="text-white/50">
+          {hasRealSizes ? "總檔案大小：" : "預估總檔案大小："}
+        </span>
+        {isEstimating ? (
+          <span className="text-highlight animate-pulse">計算中...</span>
+        ) : (
+          <span className="text-highlight font-medium">
+            {formatFileSize(
+              downloadFormat === "pdf"
+                ? Math.round(totalEstimatedSize * 1.08)
+                : totalEstimatedSize,
+            )}
+          </span>
+        )}
+      </div>
+
       {/* 操作按鈕 */}
       <div className="flex flex-col gap-2 mt-auto pt-4">
         <button
-          onClick={onApply}
-          disabled={isExporting}
+          onClick={onBatchEstimate}
+          disabled={isEstimating}
           className="w-full px-4 py-2 bg-highlight text-black font-bold rounded-[10px] transition-all btn-highlight disabled:opacity-30"
         >
-          {isExporting ? "處理中..." : "套用並預覽"}
+          {isEstimating ? "計算中..." : "估算檔案尺寸"}
         </button>
-        {(previewUrl || previewBlob) && (
-          <button
-            onClick={handleDownload}
-            disabled={isBatchExporting}
-            className="w-full px-4 py-2 text-center text-white/80 hover:text-white border border-white/20 rounded-[10px] transition-colors disabled:opacity-30"
-          >
-            {isBatchExporting
-              ? "匯出中..."
-              : downloadFormat === "pdf"
+        <button
+          onClick={onDownload}
+          disabled={isDownloading}
+          className="w-full px-4 py-2 text-center text-white/80 hover:text-white border border-white/20 rounded-[10px] transition-colors disabled:opacity-30"
+        >
+          {isDownloading
+            ? "匯出中..."
+            : isMultiImage
+              ? downloadFormat === "pdf"
                 ? "下載 PDF"
-                : "下載圖片"}
-          </button>
-        )}
+                : "下載 ZIP"
+              : "下載圖片"}
+        </button>
         <button
           onClick={onReturn}
-          disabled={isExporting}
           className="w-full px-4 py-2 text-white/80 hover:text-white transition-colors"
         >
           返回裁切
@@ -795,4 +815,92 @@ function OutputSettingsPanel({
       </div>
     </div>
   );
+}
+
+// ============================================================
+// Helpers
+// ============================================================
+
+/** 數學公式估算檔案大小 (bytes) */
+function estimateFileSize(
+  w: number,
+  h: number,
+  format: string,
+  quality: number,
+): number {
+  const pixels = w * h;
+  switch (format) {
+    case "png":
+      return Math.round(pixels * 3);
+    case "jpeg":
+      return Math.round(pixels * (0.1 + (quality / 100) * 1.0));
+    case "webp":
+      return Math.round(pixels * (0.05 + (quality / 100) * 0.6));
+    default:
+      return Math.round(pixels * 3);
+  }
+}
+
+/** 格式化檔案大小顯示 */
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+}
+
+/**
+ * 生成圖片 blob，支援 targetKB 二分搜尋品質自動調整。
+ * 當 targetBytes 不為 null 且格式非 PNG 時，使用二分搜尋
+ * 尋找能使 blob 大小 <= targetBytes 的最高品質。
+ */
+async function generateImageBlobWithLimit(
+  img: ImageItem,
+  tw: number,
+  th: number,
+  mime: "image/png" | "image/jpeg" | "image/webp",
+  quality: number,
+  targetBytes: number | null,
+): Promise<Blob> {
+  const { editorState, imageInfo } = img.pipelineState;
+  const baseOpts = { targetWidth: tw, targetHeight: th, format: mime };
+
+  // 無限制或 PNG (無損) → 直接生成
+  if (!targetBytes || mime === "image/png") {
+    const r = await generateCroppedImage(img.imgElement, editorState, imageInfo, {
+      ...baseOpts,
+      quality,
+    });
+    return r.blob;
+  }
+
+  // 先以最高品質測試
+  let minQ = 0.1;
+  let maxQ = 1.0;
+  let r = await generateCroppedImage(img.imgElement, editorState, imageInfo, {
+    ...baseOpts,
+    quality: maxQ,
+  });
+
+  // 最高品質已在限制內 → 直接回傳
+  if (r.blob.size <= targetBytes) return r.blob;
+
+  // 二分搜尋：找到能符合限制的最高品質
+  let attempts = 0;
+  while (attempts < 10 && maxQ - minQ > 0.02) {
+    const midQ = (minQ + maxQ) / 2;
+    r = await generateCroppedImage(img.imgElement, editorState, imageInfo, {
+      ...baseOpts,
+      quality: midQ,
+    });
+    if (r.blob.size > targetBytes) maxQ = midQ;
+    else minQ = midQ;
+    attempts++;
+  }
+
+  // 以找到的品質做最終生成
+  r = await generateCroppedImage(img.imgElement, editorState, imageInfo, {
+    ...baseOpts,
+    quality: minQ,
+  });
+  return r.blob;
 }

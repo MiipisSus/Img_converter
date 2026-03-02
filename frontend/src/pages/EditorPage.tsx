@@ -12,6 +12,7 @@ import {
 } from "../utils/containerParams";
 import type { EditorState, ImageInfo } from "../hooks/useImageEditor";
 import type { PipelineState, ImageItem } from "../types";
+import { loadImageFile } from "../utils/loadImageFile";
 
 type EditorMode = "preview" | "crop";
 
@@ -20,6 +21,7 @@ interface EditorPageProps {
   activeImageId: string;
   onSelectImage: (id: string) => void;
   onUpdateImage: (id: string, updates: Partial<ImageItem>) => void;
+  onAppendImages: (newImages: ImageItem[]) => void;
   imageRef: React.MutableRefObject<HTMLImageElement | null>;
   setPipelineState: React.Dispatch<
     React.SetStateAction<PipelineState | null>
@@ -33,6 +35,7 @@ export function EditorPage({
   activeImageId,
   onSelectImage,
   onUpdateImage,
+  onAppendImages,
   imageRef,
   setPipelineState,
   onExport,
@@ -40,6 +43,21 @@ export function EditorPage({
 }: EditorPageProps) {
   const [mode, setMode] = useState<EditorMode>("preview");
   const [isExporting, setIsExporting] = useState(false);
+
+  // ── 追加圖片 ──
+  const appendInputRef = useRef<HTMLInputElement>(null);
+  const handleAppendFiles = useCallback(
+    async (e: React.ChangeEvent<HTMLInputElement>) => {
+      const files = e.target.files;
+      if (!files || files.length === 0) return;
+      const imageFiles = Array.from(files).filter((f) => f.type.startsWith("image/"));
+      if (imageFiles.length === 0) return;
+      const items = await Promise.all(imageFiles.map(loadImageFile));
+      onAppendImages(items);
+      e.target.value = "";
+    },
+    [onAppendImages],
+  );
 
   // ── 隔離渲染: 從 images + activeImageId 衍生當前圖片資料 ──
   const currentImageData = useMemo(() => {
@@ -820,28 +838,49 @@ export function EditorPage({
           )}
         </div>
 
-        {/* 縮圖列表 — 固定高度，多圖時顯示 */}
-        {images.length > 1 && (
-          <div className="h-[120px] shrink-0 w-full overflow-x-auto thumbnail-scroll px-5 py-2.5 flex items-center gap-3">
-            {images.map((item) => (
-              <button
-                key={item.id}
-                onClick={() => onSelectImage(item.id)}
-                className={`shrink-0 w-16 h-16 rounded-lg overflow-hidden border-2 transition-colors ${
-                  item.id === activeImageId
-                    ? "border-highlight"
-                    : "border-transparent hover:border-white/30"
-                }`}
-              >
-                <img
-                  src={item.pipelineState.previewUrl ?? item.src}
-                  className="w-full h-full object-cover"
-                  alt=""
-                />
-              </button>
-            ))}
-          </div>
-        )}
+        {/* 縮圖列表 — 固定高度，含追加按鈕 */}
+        <div className="h-[120px] shrink-0 w-full overflow-x-auto thumbnail-scroll px-5 py-2.5 flex items-center gap-3">
+          {/* 追加圖片按鈕 (固定最左側) */}
+          <button
+            onClick={() => appendInputRef.current?.click()}
+            className="shrink-0 w-16 h-16 rounded-lg border-2 border-dashed border-white/30 hover:border-highlight/60 bg-white/5 hover:bg-white/10 flex items-center justify-center transition-colors"
+          >
+            <svg className="w-7 h-7" viewBox="0 0 24 24" fill="none">
+              <path
+                d="M12 5v14m-7-7h14"
+                stroke="#D4FF3F"
+                strokeWidth={2.5}
+                strokeLinecap="round"
+              />
+            </svg>
+          </button>
+          <input
+            ref={appendInputRef}
+            type="file"
+            accept="image/*"
+            multiple
+            onChange={handleAppendFiles}
+            className="hidden"
+          />
+
+          {images.map((item) => (
+            <button
+              key={item.id}
+              onClick={() => onSelectImage(item.id)}
+              className={`shrink-0 w-16 h-16 rounded-lg overflow-hidden border-2 transition-colors ${
+                item.id === activeImageId
+                  ? "border-highlight"
+                  : "border-transparent hover:border-white/30"
+              }`}
+            >
+              <img
+                src={item.pipelineState.previewUrl ?? item.src}
+                className="w-full h-full object-cover"
+                alt=""
+              />
+            </button>
+          ))}
+        </div>
       </main>
     </div>
   );
