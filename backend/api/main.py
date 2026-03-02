@@ -10,7 +10,7 @@ FastAPI 應用程式主入口
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from .routers import health, images
+from .routers import health, images, videos
 
 # 建立 FastAPI 應用程式
 app = FastAPI(
@@ -56,6 +56,7 @@ app.add_middleware(
 # 註冊路由
 app.include_router(health.router, tags=["健康檢查"])
 app.include_router(images.router)
+app.include_router(videos.router)
 
 
 @app.get("/", tags=["根路徑"])

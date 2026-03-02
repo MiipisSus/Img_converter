@@ -6,5 +6,6 @@ API 路由模組
 
 from . import health
 from . import images
+from . import videos
 
-__all__ = ['health', 'images']
+__all__ = ['health', 'images', 'videos']

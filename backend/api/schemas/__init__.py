@@ -12,6 +12,12 @@ from .images import (
     ProcessingResultResponse,
     ErrorResponse
 )
+from .videos import (
+    VideoInfoResponse,
+    BitrateEstimateResponse,
+    TaskSubmitResponse,
+    TaskStatusResponse,
+)
 
 __all__ = [
     'OperationType',
@@ -19,5 +25,9 @@ __all__ = [
     'ImageOperationParams',
     'ImageInfoResponse',
     'ProcessingResultResponse',
-    'ErrorResponse'
+    'ErrorResponse',
+    'VideoInfoResponse',
+    'BitrateEstimateResponse',
+    'TaskSubmitResponse',
+    'TaskStatusResponse',
 ]

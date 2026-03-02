@@ -1,0 +1,385 @@
+"""
+影片處理服務模組
+
+提供影片壓縮、位元率計算與格式轉換功能
+使用 MoviePy + FFmpeg 進行影片處理
+"""
+
+import os
+import tempfile
+from typing import Optional, Tuple, Callable
+from dataclasses import dataclass
+from concurrent.futures import ThreadPoolExecutor
+
+
+# ── 位元率計算結果 ──
+
+@dataclass
+class BitrateConfig:
+    """位元率計算結果"""
+    video_bitrate_kbps: int
+    audio_bitrate_kbps: int
+    total_bitrate_kbps: int
+    target_kb: int
+    duration_sec: float
+    warning: Optional[str] = None
+
+
+# ── 解析度對應位元率上限 (kbps) ──
+RESOLUTION_BITRATE_CAP = {
+    360: 2_000,
+    480: 5_000,
+    720: 10_000,
+    1080: 20_000,
+    1440: 40_000,
+    2160: 80_000,
+}
+
+
+def _get_bitrate_cap(height: int) -> int:
+    """根據影片高度取得合理的位元率上限 (kbps)"""
+    for res, cap in sorted(RESOLUTION_BITRATE_CAP.items()):
+        if height <= res:
+            return cap
+    return 100_000
+
+
+def calculate_bitrate(
+    target_kb: int,
+    duration_sec: float,
+    include_audio: bool = True,
+    video_height: Optional[int] = None,
+) -> BitrateConfig:
+    """
+    位元率預算精確計算
+
+    公式：
+    - 總位元 = target_kb × 1024 × 8 × 0.98 (扣除 2% MP4 封裝損耗)
+    - 音訊位元 = 128,000 × duration_sec (AAC 128kbps)
+    - 影像位元率 = (總位元 - 音訊位元) / duration_sec
+    """
+    if duration_sec <= 0:
+        raise ValueError("影片時長必須大於 0 秒")
+    if target_kb <= 0:
+        raise ValueError("目標檔案大小必須大於 0 KB")
+
+    audio_bitrate_kbps = 128 if include_audio else 0
+    audio_bits = audio_bitrate_kbps * 1000 * duration_sec
+    total_bits = target_kb * 1024 * 8 * 0.98
+    video_bits = total_bits - audio_bits
+    video_bitrate_kbps = int(video_bits / duration_sec / 1000)
+
+    warning: Optional[str] = None
+
+    if video_bitrate_kbps < 200:
+        video_bitrate_kbps = 200
+        warning = "目標體積過小，已觸發最低畫質保護 (200kbps)"
+
+    if video_height is not None:
+        cap = _get_bitrate_cap(video_height)
+        if video_bitrate_kbps > cap:
+            video_bitrate_kbps = cap
+            warning = f"位元率已限制為 {cap}kbps (適合 {video_height}p 解析度)"
+
+    total_kbps = video_bitrate_kbps + audio_bitrate_kbps
+
+    return BitrateConfig(
+        video_bitrate_kbps=video_bitrate_kbps,
+        audio_bitrate_kbps=audio_bitrate_kbps,
+        total_bitrate_kbps=total_kbps,
+        target_kb=target_kb,
+        duration_sec=duration_sec,
+        warning=warning,
+    )
+
+
+# ── 進度追蹤 Logger ──
+
+class _ProgressLogger:
+    """
+    自訂 proglog logger，攔截 MoviePy 的進度更新。
+
+    MoviePy 2.x 的 write_videofile(logger=) 接受：
+    - None (靜默)
+    - "bar" (tqdm 進度條)
+    - 自訂 ProgressBarLogger 實例
+
+    我們繼承 ProgressBarLogger，覆寫 bars_callback 來追蹤 t (已處理秒數)。
+    """
+
+    def __init__(self, duration: float, on_progress: Optional[Callable[[int], None]] = None):
+        from proglog import ProgressBarLogger
+
+        self._duration = max(duration, 0.01)
+        self._on_progress = on_progress
+        self._last_pct = 0
+
+        outer = self
+
+        class _Inner(ProgressBarLogger):
+            def bars_callback(self, bar, attr, value, old_value=None):
+                if bar == "t" and attr == "index":
+                    pct = min(int(value / outer._duration * 100), 99)
+                    if pct != outer._last_pct:
+                        outer._last_pct = pct
+                        if outer._on_progress:
+                            outer._on_progress(pct)
+
+        self.logger = _Inner()
+
+
+class VideoService:
+    """影片處理服務類別"""
+
+    SUPPORTED_FORMATS = {'mp4', 'webm', 'avi', 'mov', 'mkv'}
+    SUPPORTED_OUTPUT_FORMATS = {'mp4', 'webm'}
+
+    def __init__(self):
+        self._executor = ThreadPoolExecutor(max_workers=2)
+
+    def get_video_info(self, video_bytes: bytes) -> dict:
+        """取得影片基本資訊"""
+        from moviepy import VideoFileClip
+
+        tmp_path = self._write_temp(video_bytes, suffix=".mp4")
+        try:
+            clip = VideoFileClip(tmp_path)
+            info = {
+                "duration": round(clip.duration, 2),
+                "width": clip.size[0],
+                "height": clip.size[1],
+                "fps": round(clip.fps, 2),
+                "has_audio": clip.audio is not None,
+                "file_size": len(video_bytes),
+            }
+            clip.close()
+            return info
+        finally:
+            os.unlink(tmp_path)
+
+    def compress_video(
+        self,
+        video_bytes: bytes,
+        target_kb: Optional[int] = None,
+        output_format: str = "mp4",
+        include_audio: bool = True,
+        quality_preset: str = "slow",
+        on_progress: Optional[Callable[[int], None]] = None,
+    ) -> Tuple[bytes, dict]:
+        """
+        壓縮影片至目標大小
+
+        Args:
+            video_bytes: 原始影片位元組
+            target_kb: 目標檔案大小 (KB)，None 表示不限制
+            output_format: 輸出格式 (mp4/webm)
+            include_audio: 是否保留音軌
+            quality_preset: FFmpeg preset
+            on_progress: 進度回調 fn(percent: int)，0-99 為首次壓制，100 = 完成
+        """
+        from moviepy import VideoFileClip
+
+        tmp_input = self._write_temp(video_bytes, suffix=".mp4")
+        tmp_output = tempfile.mktemp(suffix=f".{output_format}")
+
+        try:
+            clip = VideoFileClip(tmp_input)
+            duration = clip.duration
+            width = clip.size[0]
+            height = clip.size[1]
+            has_audio = clip.audio is not None and include_audio
+
+            # ── 計算位元率 ──
+            bitrate_config: Optional[BitrateConfig] = None
+            ffmpeg_params = ["-preset", quality_preset]
+
+            if target_kb is not None:
+                bitrate_config = calculate_bitrate(
+                    target_kb=target_kb,
+                    duration_sec=duration,
+                    include_audio=has_audio,
+                    video_height=height,
+                )
+                video_br = f"{bitrate_config.video_bitrate_kbps}k"
+                audio_br = f"{bitrate_config.audio_bitrate_kbps}k" if has_audio else None
+                ffmpeg_params.extend([
+                    "-b:v", video_br,
+                    "-maxrate", video_br,
+                    "-bufsize", f"{bitrate_config.video_bitrate_kbps * 2}k",
+                ])
+            else:
+                video_br = None
+                audio_br = "128k" if has_audio else None
+                ffmpeg_params.extend(["-crf", "23"])
+
+            # ── 建立進度 logger ──
+            progress_logger = _ProgressLogger(duration, on_progress)
+
+            # ── 寫出影片 ──
+            codec = "libx264" if output_format == "mp4" else "libvpx-vp9"
+            write_kwargs = {
+                "codec": codec,
+                "audio": has_audio,
+                "ffmpeg_params": ffmpeg_params,
+                "logger": progress_logger.logger,
+            }
+            if audio_br and has_audio:
+                write_kwargs["audio_bitrate"] = audio_br
+            if video_br:
+                write_kwargs["bitrate"] = video_br
+
+            clip.write_videofile(tmp_output, **write_kwargs)
+            clip.close()
+
+            # ── 讀取結果 ──
+            with open(tmp_output, "rb") as f:
+                result_bytes = f.read()
+
+            result_size_kb = len(result_bytes) / 1024
+
+            # ── 二次壓制 (若超出目標) ──
+            if target_kb is not None and result_size_kb > target_kb:
+                result_bytes, result_size_kb = self._second_pass(
+                    tmp_input, output_format,
+                    target_kb, duration, height, has_audio,
+                    quality_preset, on_progress,
+                )
+
+            # 通知完成
+            if on_progress:
+                on_progress(100)
+
+            info = {
+                "original_size_kb": round(len(video_bytes) / 1024, 1),
+                "output_size_kb": round(result_size_kb, 1),
+                "duration": round(duration, 2),
+                "width": width,
+                "height": height,
+                "video_bitrate_kbps": bitrate_config.video_bitrate_kbps if bitrate_config else None,
+                "audio_bitrate_kbps": bitrate_config.audio_bitrate_kbps if bitrate_config else None,
+                "warning": bitrate_config.warning if bitrate_config else None,
+            }
+
+            return result_bytes, info
+
+        finally:
+            for p in [tmp_input, tmp_output]:
+                if os.path.exists(p):
+                    os.unlink(p)
+
+    def estimate_config(
+        self,
+        video_bytes: bytes,
+        target_kb: Optional[int] = None,
+        include_audio: bool = True,
+    ) -> dict:
+        """處理前先回傳預估配置，不實際壓縮"""
+        from moviepy import VideoFileClip
+
+        tmp_path = self._write_temp(video_bytes, suffix=".mp4")
+        try:
+            clip = VideoFileClip(tmp_path)
+            duration = clip.duration
+            height = clip.size[1]
+            width = clip.size[0]
+            has_audio = clip.audio is not None and include_audio
+            clip.close()
+
+            result: dict = {
+                "duration": round(duration, 2),
+                "width": width,
+                "height": height,
+                "has_audio": has_audio,
+                "original_size_kb": round(len(video_bytes) / 1024, 1),
+            }
+
+            if target_kb is not None:
+                config = calculate_bitrate(
+                    target_kb=target_kb,
+                    duration_sec=duration,
+                    include_audio=has_audio,
+                    video_height=height,
+                )
+                result["estimated_video_bitrate_kbps"] = config.video_bitrate_kbps
+                result["estimated_audio_bitrate_kbps"] = config.audio_bitrate_kbps
+                result["estimated_total_bitrate_kbps"] = config.total_bitrate_kbps
+                result["warning"] = config.warning
+            else:
+                result["estimated_video_bitrate_kbps"] = None
+                result["estimated_audio_bitrate_kbps"] = 128 if has_audio else 0
+                result["warning"] = None
+
+            return result
+        finally:
+            os.unlink(tmp_path)
+
+    # ── 私有方法 ──
+
+    def _second_pass(
+        self,
+        tmp_input: str,
+        output_format: str,
+        target_kb: int,
+        duration: float,
+        height: int,
+        has_audio: bool,
+        quality_preset: str,
+        on_progress: Optional[Callable[[int], None]] = None,
+    ) -> Tuple[bytes, float]:
+        """二次壓制：以 0.9 係數降低位元率重新壓縮"""
+        from moviepy import VideoFileClip
+
+        reduced_target = int(target_kb * 0.9)
+        config = calculate_bitrate(
+            target_kb=reduced_target,
+            duration_sec=duration,
+            include_audio=has_audio,
+            video_height=height,
+        )
+
+        video_br = f"{config.video_bitrate_kbps}k"
+        audio_br = f"{config.audio_bitrate_kbps}k" if has_audio else None
+
+        ffmpeg_params = [
+            "-preset", quality_preset,
+            "-b:v", video_br,
+            "-maxrate", video_br,
+            "-bufsize", f"{config.video_bitrate_kbps * 2}k",
+        ]
+
+        codec = "libx264" if output_format == "mp4" else "libvpx-vp9"
+        progress_logger = _ProgressLogger(duration, on_progress)
+
+        tmp_output_2 = tempfile.mktemp(suffix=f".{output_format}")
+        try:
+            clip = VideoFileClip(tmp_input)
+            write_kwargs = {
+                "codec": codec,
+                "audio": has_audio,
+                "ffmpeg_params": ffmpeg_params,
+                "logger": progress_logger.logger,
+                "bitrate": video_br,
+            }
+            if audio_br and has_audio:
+                write_kwargs["audio_bitrate"] = audio_br
+
+            clip.write_videofile(tmp_output_2, **write_kwargs)
+            clip.close()
+
+            with open(tmp_output_2, "rb") as f:
+                result_bytes = f.read()
+
+            return result_bytes, len(result_bytes) / 1024
+        finally:
+            if os.path.exists(tmp_output_2):
+                os.unlink(tmp_output_2)
+
+    @staticmethod
+    def _write_temp(data: bytes, suffix: str = ".mp4") -> str:
+        """將位元組寫入暫存檔，回傳路徑"""
+        fd, path = tempfile.mkstemp(suffix=suffix)
+        try:
+            os.write(fd, data)
+        finally:
+            os.close(fd)
+        return path

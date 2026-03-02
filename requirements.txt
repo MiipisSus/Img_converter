@@ -4,6 +4,9 @@ pillow-heif>=0.16.0  # HEIF/HEIC 格式支援
 cairosvg>=2.7.0      # SVG 向量格式支援
 fpdf2>=2.7.0         # PDF 匯出
 
+# 影片處理
+moviepy>=2.0.0       # 影片編輯 (需系統安裝 FFmpeg)
+
 # CLI 框架
 click>=8.1.7
 
