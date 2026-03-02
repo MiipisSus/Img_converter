@@ -466,6 +466,9 @@ IMAGE_MAGIC_PREFIXES = [
 async def export_pdf(
     images: List[UploadFile] = File(..., description="要匯出的圖片檔案（1~50 張）"),
     filename: str = Form(default="export.pdf", description="匯出的 PDF 檔名"),
+    pdf_mode: str = Form(default="standard", description="PDF 模式：high=PNG無損, standard=JPEG壓縮"),
+    quality: int = Form(default=95, ge=1, le=100, description="內嵌圖片壓縮品質 (1-100，僅 standard 模式)"),
+    total_target_kb: Optional[int] = Form(default=None, ge=1, description="PDF 目標總檔案大小 (KB)，null 不限制"),
 ):
     """
     將多張圖片匯出為 PDF
@@ -503,6 +506,9 @@ async def export_pdf(
         pdf_bytes, page_count = await run_in_executor_async(
             service.generate_pdf_from_image_bytes_list,
             image_bytes_list,
+            pdf_mode,
+            quality,
+            total_target_kb,
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"PDF 生成錯誤: {str(e)}")

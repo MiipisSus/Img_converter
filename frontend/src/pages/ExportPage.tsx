@@ -233,6 +233,14 @@ export function ExportPage({
     }
   }, [setImages, images]);
 
+  // ── 下載格式 + PDF 模式 (放在 mathEstimates 之前，供估算使用) ──
+  const [downloadFormat, setDownloadFormat] = useState<"image" | "pdf">("image");
+  const downloadFormatRef = useRef(downloadFormat);
+  downloadFormatRef.current = downloadFormat;
+  const [pdfMode, setPdfMode] = useState<"high" | "standard">("high");
+  const pdfModeRef = useRef(pdfMode);
+  pdfModeRef.current = pdfMode;
+
   // ── 檔案大小預估 ──
   const mathEstimates = useMemo(() => {
     const sizes: Record<string, number> = {};
@@ -240,7 +248,9 @@ export function ExportPage({
       const cs = getCroppedOriginalSize(img.pipelineState.editorState, img.pipelineState.imageInfo);
       const w = img.pipelineState.resize.targetWidth || cs.width;
       const h = img.pipelineState.resize.targetHeight || cs.height;
-      const { fmt } = resolveFormat(img.exportFormat ?? outputSettings.format);
+      const fmt = downloadFormat === "pdf"
+        ? (pdfMode === "high" ? "png" : "jpeg")
+        : resolveFormat(img.exportFormat ?? outputSettings.format).fmt;
       sizes[img.id] = estimateFileSize(
         w, h,
         fmt,
@@ -248,7 +258,7 @@ export function ExportPage({
       );
     }
     return sizes;
-  }, [images, outputSettings.format, outputSettings.quality]);
+  }, [images, outputSettings.format, outputSettings.quality, downloadFormat, pdfMode]);
 
   const [realSizes, setRealSizes] = useState<Record<string, number>>({});
   const [isEstimating, setIsEstimating] = useState(false);
@@ -277,15 +287,25 @@ export function ExportPage({
     try {
       const os = outputSettingsRef.current;
       const imgs = imagesRef.current;
+      const isPdf = downloadFormatRef.current === "pdf";
+      const currentPdfMode = pdfModeRef.current;
+
       const hasLimit = os.enableTargetKB && os.targetKB;
       let targetBytes: number | null = null;
       if (hasLimit) {
         const totalBytes = os.targetKB! * 1024;
-        targetBytes =
-          targetKBScopeRef.current === "all"
-            ? Math.floor(totalBytes / imgs.length)
-            : totalBytes;
+        if (isPdf) {
+          // PDF: targetKB = 整個 PDF 大小，扣除 5% 結構開銷後平均分配
+          const available = Math.max(1024, Math.floor(totalBytes * 0.95));
+          targetBytes = Math.floor(available / imgs.length);
+        } else {
+          targetBytes =
+            targetKBScopeRef.current === "all"
+              ? Math.floor(totalBytes / imgs.length)
+              : totalBytes;
+        }
       }
+
       const newRealSizes: Record<string, number> = {};
       for (const img of imgs) {
         const cs = getCroppedOriginalSize(
@@ -294,10 +314,20 @@ export function ExportPage({
         );
         const tw = img.pipelineState.resize.targetWidth || cs.width;
         const th = img.pipelineState.resize.targetHeight || cs.height;
-        const { mime } = resolveFormat(img.exportFormat ?? os.format);
-        const q = (img.exportQuality ?? os.quality) / 100;
 
-        const blob = await generateImageBlobWithLimit(img, tw, th, mime, q, targetBytes);
+        let mime: "image/png" | "image/jpeg" | "image/webp";
+        let q: number;
+        if (isPdf) {
+          mime = currentPdfMode === "high" ? "image/png" : "image/jpeg";
+          q = currentPdfMode === "high" ? 1.0 : (img.exportQuality ?? os.quality) / 100;
+        } else {
+          mime = resolveFormat(img.exportFormat ?? os.format).mime;
+          q = (img.exportQuality ?? os.quality) / 100;
+        }
+
+        // 高品質 PDF 不限制單張大小 (PNG 無損)
+        const effectiveTarget = (isPdf && currentPdfMode === "high") ? null : targetBytes;
+        const blob = await generateImageBlobWithLimit(img, tw, th, mime, q, effectiveTarget);
         newRealSizes[img.id] = blob.size;
       }
       setRealSizes(newRealSizes);
@@ -318,7 +348,6 @@ export function ExportPage({
   }, []); // intentional: only on mount
 
   // ── 下載邏輯 (即時生成 blob，帶正確輸出格式) ──
-  const [downloadFormat, setDownloadFormat] = useState<"image" | "pdf">("image");
   const [isDownloading, setIsDownloading] = useState(false);
 
   const handleDownload = async () => {
@@ -328,9 +357,13 @@ export function ExportPage({
       const imgs = imagesRef.current;
       const isMulti = imgs.length > 1;
       const os = outputSettingsRef.current;
+      const isPdf = downloadFormatRef.current === "pdf";
+      const currentPdfMode = pdfModeRef.current;
       const hasLimit = os.enableTargetKB && os.targetKB;
+
+      // 圖片格式才在前端做 per-image 限制，PDF 交給後端處理 total_target_kb
       let targetBytes: number | null = null;
-      if (hasLimit) {
+      if (hasLimit && !isPdf) {
         const totalBytes = os.targetKB! * 1024;
         targetBytes =
           targetKBScopeRef.current === "all"
@@ -338,7 +371,7 @@ export function ExportPage({
             : totalBytes;
       }
 
-      // 為所有圖片即時生成 blob (帶正確的格式/品質/尺寸，含 targetKB 限制)
+      // 為所有圖片即時生成 blob
       const allResults = await Promise.all(
         imgs.map(async (img) => {
           const cs = getCroppedOriginalSize(
@@ -352,17 +385,27 @@ export function ExportPage({
           const th = isActive
             ? os.targetHeight
             : (img.pipelineState.resize.targetHeight || cs.height);
-          const { fmt, mime } = resolveFormat(img.exportFormat ?? os.format);
-          const q = (img.exportQuality ?? os.quality) / 100;
+
+          let fmt: string;
+          let mime: "image/png" | "image/jpeg" | "image/webp";
+          let q: number;
+          if (isPdf) {
+            fmt = currentPdfMode === "high" ? "png" : "jpeg";
+            mime = currentPdfMode === "high" ? "image/png" : "image/jpeg";
+            q = currentPdfMode === "high" ? 1.0 : (img.exportQuality ?? os.quality) / 100;
+          } else {
+            const resolved = resolveFormat(img.exportFormat ?? os.format);
+            fmt = resolved.fmt;
+            mime = resolved.mime;
+            q = (img.exportQuality ?? os.quality) / 100;
+          }
 
           const blob = await generateImageBlobWithLimit(img, tw, th, mime, q, targetBytes);
           return { blob, ext: fmt };
         }),
       );
 
-      console.log("Sending images count:", allResults.length);
-
-      if (!isMulti && downloadFormat === "image") {
+      if (!isMulti && !isPdf) {
         // 單圖直接下載
         const { blob, ext } = allResults[0];
         const url = URL.createObjectURL(blob);
@@ -371,7 +414,7 @@ export function ExportPage({
         a.download = `processed-image.${ext}`;
         a.click();
         URL.revokeObjectURL(url);
-      } else if (downloadFormat === "image") {
+      } else if (!isPdf) {
         // 多圖 ZIP
         const JSZip = (await import("jszip")).default;
         const zip = new JSZip();
@@ -386,12 +429,17 @@ export function ExportPage({
         a.click();
         URL.revokeObjectURL(url);
       } else {
-        // PDF
+        // PDF — 傳送 pdfMode/品質/總限制給後端
         const { exportPdf } = await import("../api/exportPdf");
-        const pdfBlob = await exportPdf(
-          allResults.map((r) => r.blob),
-          "export.pdf",
-        );
+        const pdfBlob = await exportPdf({
+          images: allResults.map((r) => r.blob),
+          filename: "export.pdf",
+          pdfMode: currentPdfMode,
+          quality: currentPdfMode === "standard" ? os.quality : undefined,
+          totalTargetKB: (hasLimit && currentPdfMode === "standard")
+            ? os.targetKB
+            : null,
+        });
         const url = URL.createObjectURL(pdfBlob);
         const a = document.createElement("a");
         a.href = url;
@@ -429,6 +477,11 @@ export function ExportPage({
             onBatchEstimate={handleBatchEstimate}
             downloadFormat={downloadFormat}
             onDownloadFormatChange={setDownloadFormat}
+            pdfMode={pdfMode}
+            onPdfModeChange={(mode: "high" | "standard") => {
+              setPdfMode(mode);
+              setTimeout(() => handleBatchEstimateRef.current(), 0);
+            }}
             targetKBScope={targetKBScope}
             onTargetKBScopeChange={handleSetTargetKBScope}
             onResetFormat={handleResetFormat}
@@ -553,6 +606,8 @@ function OutputSettingsPanel({
   onBatchEstimate,
   downloadFormat,
   onDownloadFormatChange,
+  pdfMode,
+  onPdfModeChange,
   targetKBScope,
   onTargetKBScopeChange,
   onResetFormat,
@@ -569,6 +624,8 @@ function OutputSettingsPanel({
   onBatchEstimate: () => void;
   downloadFormat: "image" | "pdf";
   onDownloadFormatChange: (format: "image" | "pdf") => void;
+  pdfMode: "high" | "standard";
+  onPdfModeChange: (mode: "high" | "standard") => void;
   targetKBScope: "single" | "all";
   onTargetKBScopeChange: (scope: "single" | "all") => void;
   onResetFormat: () => void;
@@ -667,7 +724,10 @@ function OutputSettingsPanel({
           ).map(([val, label]) => (
             <button
               key={val}
-              onClick={() => onDownloadFormatChange(val)}
+              onClick={() => {
+                onDownloadFormatChange(val);
+                setTimeout(() => onBatchEstimate(), 0);
+              }}
               className={`flex-1 px-2 py-1.5 text-sm rounded-[10px] transition-colors ${
                 downloadFormat === val
                   ? "bg-highlight text-black font-medium"
@@ -794,19 +854,19 @@ function OutputSettingsPanel({
       )}
 
       {/* 匯出格式 */}
-      <div
-        className={`bg-white/10 rounded-[10px] p-3 transition-opacity ${
-          downloadFormat === "pdf" ? "opacity-40 pointer-events-none" : ""
-        }`}
-      >
+      <div className="bg-white/10 rounded-[10px] p-3">
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-2">
-            <p className="text-xs text-white/70 font-medium">匯出格式</p>
-            <span className="text-[10px] text-white/30">
-              原始：{originalFormat.toUpperCase()}
-            </span>
+            <p className="text-xs text-white/70 font-medium">
+              {downloadFormat === "pdf" ? "PDF 模式" : "匯出格式"}
+            </p>
+            {downloadFormat !== "pdf" && (
+              <span className="text-[10px] text-white/30">
+                原始：{originalFormat.toUpperCase()}
+              </span>
+            )}
           </div>
-          {(format !== originalFormat || settings.quality !== 92 || settings.enableTargetKB) && (
+          {downloadFormat !== "pdf" && (format !== originalFormat || settings.quality !== 92 || settings.enableTargetKB) && (
             <button
               onClick={onResetFormat}
               className="text-[11px] text-white/50 hover:text-white transition-colors"
@@ -816,33 +876,60 @@ function OutputSettingsPanel({
           )}
         </div>
 
-        <div className="flex gap-2 mb-3">
-          {(["png", "jpeg", "webp"] as const).map((fmt) => {
-            const label = fmt.toUpperCase();
-            return (
+        {downloadFormat === "pdf" ? (
+          <div className="flex gap-2 mb-3">
+            {(
+              [
+                ["high", "高品質"],
+                ["standard", "標準"],
+              ] as const
+            ).map(([mode, label]) => (
               <button
-                key={fmt}
-                onClick={() => {
-                  onUpdateSettings({ format: fmt });
-                  setTimeout(() => onBatchEstimate(), 0);
-                }}
+                key={mode}
+                onClick={() => onPdfModeChange(mode)}
                 className={`flex-1 px-2 py-1.5 text-sm rounded-[10px] transition-colors ${
-                  format === fmt
+                  pdfMode === mode
                     ? "bg-highlight text-black font-medium"
                     : "bg-white/10 text-white/80 hover:bg-white/20"
                 }`}
               >
                 {label}
               </button>
-            );
-          })}
-        </div>
+            ))}
+          </div>
+        ) : (
+          <div className="flex gap-2 mb-3">
+            {(["png", "jpeg", "webp"] as const).map((fmt) => {
+              const label = fmt.toUpperCase();
+              return (
+                <button
+                  key={fmt}
+                  onClick={() => {
+                    onUpdateSettings({ format: fmt });
+                    setTimeout(() => onBatchEstimate(), 0);
+                  }}
+                  className={`flex-1 px-2 py-1.5 text-sm rounded-[10px] transition-colors ${
+                    format === fmt
+                      ? "bg-highlight text-black font-medium"
+                      : "bg-white/10 text-white/80 hover:bg-white/20"
+                  }`}
+                >
+                  {label}
+                </button>
+              );
+            })}
+          </div>
+        )}
 
-        {format === "png" && (
+        {downloadFormat === "pdf" && pdfMode === "high" && (
+          <p className="text-xs text-white/60">以 PNG 無損內嵌，檔案較大</p>
+        )}
+
+        {downloadFormat !== "pdf" && format === "png" && (
           <p className="text-xs text-white/60 mb-3">PNG 為無損格式，不支援品質調整</p>
         )}
 
-        {format !== "png" && (
+        {((downloadFormat === "pdf" && pdfMode === "standard") || (downloadFormat !== "pdf" && format !== "png")) && (
           <div className="pt-3 border-t border-white/10">
             <div className="flex gap-1 mb-3 bg-white/5 rounded-lg p-0.5">
               <button
@@ -923,8 +1010,8 @@ function OutputSettingsPanel({
                   />
                   <span className="text-xs text-white/60 shrink-0">KB</span>
 
-                  {/* 範圍切換：單張 / 全部 (放在 KB 右側) */}
-                  {images.length > 1 && (
+                  {/* 範圍切換：單張 / 全部 (放在 KB 右側，PDF 模式隱藏) */}
+                  {images.length > 1 && downloadFormat !== "pdf" && (
                     <div className={`flex gap-0.5 bg-white/5 rounded-md p-0.5 shrink-0 ml-auto ${
                       !unifiedOutput ? "opacity-40 pointer-events-none" : ""
                     }`}>
@@ -954,12 +1041,12 @@ function OutputSettingsPanel({
                 </div>
 
                 {/* 說明文字 */}
-                {images.length > 1 && (
+                {(images.length > 1 || downloadFormat === "pdf") && (
                   <p className="text-[10px] text-white/50">
-                    {targetKBScope === "single"
-                      ? "每張圖片各自 ≤ 限制大小"
-                      : downloadFormat === "pdf"
-                        ? "PDF 總檔案 ≤ 限制大小"
+                    {downloadFormat === "pdf"
+                      ? "PDF 總檔案 ≤ 限制大小"
+                      : targetKBScope === "single"
+                        ? "每張圖片各自 ≤ 限制大小"
                         : "ZIP 總檔案 ≤ 限制大小"}
                   </p>
                 )}
@@ -980,7 +1067,7 @@ function OutputSettingsPanel({
           <span className="text-highlight font-medium">
             {formatFileSize(
               downloadFormat === "pdf"
-                ? Math.round(totalEstimatedSize * 1.08)
+                ? Math.round(totalEstimatedSize * 1.05)
                 : totalEstimatedSize,
             )}
           </span>

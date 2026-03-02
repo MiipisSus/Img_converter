@@ -1390,45 +1390,110 @@ class ImageService:
         finally:
             img.close()
 
-    def generate_pdf_from_image_bytes_list(self, image_bytes_list: list[bytes]) -> tuple[bytes, int]:
+    def generate_pdf_from_image_bytes_list(
+        self,
+        image_bytes_list: list[bytes],
+        pdf_mode: str = "standard",
+        quality: int = 95,
+        total_target_kb: int | None = None,
+    ) -> tuple[bytes, int]:
         """
         將多張圖片合併為一個 PDF，每張圖片獨立一頁，頁面尺寸 = 圖片尺寸
 
         Args:
             image_bytes_list: 圖片 bytes 列表
+            pdf_mode: 'high' = PNG 無損內嵌, 'standard' = JPEG 壓縮內嵌
+            quality: 內嵌圖片壓縮品質 (1-100，僅 standard 模式)
+            total_target_kb: PDF 目標總檔案大小 (KB)，None 不限制 (僅 standard 模式)
 
         Returns:
             tuple[bytes, int]: (PDF bytes, 頁數)
         """
         from fpdf import FPDF
 
+        page_count = len(image_bytes_list)
+
+        # standard 模式下計算每張圖片的目標大小
+        per_image_limit: int | None = None
+        if pdf_mode == "standard" and total_target_kb is not None:
+            total_bytes = total_target_kb * 1024
+            pdf_overhead = max(page_count * 1024, int(total_bytes * 0.05))
+            available = max(1024, total_bytes - pdf_overhead)
+            per_image_limit = int(available / page_count)
+
+        def _open_image(img_bytes: bytes) -> Image.Image:
+            """載入圖片"""
+            return Image.open(io.BytesIO(img_bytes))
+
+        def _prepare_rgb(img: Image.Image) -> Image.Image:
+            """轉為 RGB (JPEG 需要)"""
+            if img.mode in ('RGBA', 'LA', 'PA'):
+                bg = Image.new('RGB', img.size, (255, 255, 255))
+                bg.paste(img, mask=img.split()[-1])
+                img.close()
+                return bg
+            if img.mode != 'RGB':
+                converted = img.convert('RGB')
+                img.close()
+                return converted
+            return img
+
+        def _compress_jpeg(img: Image.Image, q: int) -> io.BytesIO:
+            """以指定品質壓縮為 JPEG"""
+            buf = io.BytesIO()
+            img.save(buf, format='JPEG', optimize=True, quality=q)
+            buf.seek(0)
+            return buf
+
+        def _save_png(img: Image.Image) -> io.BytesIO:
+            """儲存為 PNG"""
+            buf = io.BytesIO()
+            img.save(buf, format='PNG')
+            buf.seek(0)
+            return buf
+
         pdf = FPDF(unit='pt')
         pdf.set_auto_page_break(auto=False)
         pdf.set_margin(0)
 
-        page_count = 0
+        actual_count = 0
         for img_bytes in image_bytes_list:
-            img = Image.open(io.BytesIO(img_bytes))
+            img = _open_image(img_bytes)
             try:
-                # RGBA → RGB 合成白底 (PDF 不支援透明)
-                if img.mode in ('RGBA', 'LA', 'PA'):
-                    background = Image.new('RGB', img.size, (255, 255, 255))
-                    background.paste(img, mask=img.split()[-1])
-                    img = background
-                elif img.mode != 'RGB':
-                    img = img.convert('RGB')
-
                 w_pt, h_pt = float(img.width), float(img.height)
 
-                # 將圖片轉為 PNG bytes 給 fpdf2
-                img_io = io.BytesIO()
-                img.save(img_io, format='PNG')
-                img_io.seek(0)
+                if pdf_mode == "high":
+                    # 高品質：直接以 PNG 內嵌 (無損)
+                    # 前端已傳送 PNG blob，嘗試直接使用原始 bytes
+                    img_io = io.BytesIO(img_bytes)
+                else:
+                    # 標準：JPEG 壓縮
+                    rgb_img = _prepare_rgb(img)
+                    if per_image_limit is not None:
+                        # 二分搜尋品質以符合大小限制
+                        buf = _compress_jpeg(rgb_img, quality)
+                        if buf.getbuffer().nbytes > per_image_limit:
+                            lo, hi = 1, quality
+                            best_buf = buf
+                            while lo <= hi:
+                                mid = (lo + hi) // 2
+                                candidate = _compress_jpeg(rgb_img, mid)
+                                if candidate.getbuffer().nbytes <= per_image_limit:
+                                    best_buf = candidate
+                                    lo = mid + 1
+                                else:
+                                    hi = mid - 1
+                            buf = best_buf
+                        img_io = buf
+                    else:
+                        img_io = _compress_jpeg(rgb_img, quality)
+                    if rgb_img is not img:
+                        rgb_img.close()
 
                 pdf.add_page(format=(w_pt, h_pt))
                 pdf.image(img_io, x=0, y=0, w=w_pt, h=h_pt)
-                page_count += 1
+                actual_count += 1
             finally:
                 img.close()
 
-        return bytes(pdf.output()), page_count
+        return bytes(pdf.output()), actual_count
