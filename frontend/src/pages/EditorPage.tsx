@@ -835,7 +835,7 @@ export function EditorPage({
         </div>
 
         {/* 縮圖列表 — 固定高度，含追加按鈕 */}
-        <div className="h-[120px] shrink-0 w-full overflow-x-auto thumbnail-scroll px-5 py-2.5 flex items-center gap-3">
+        <div className={`h-[120px] shrink-0 w-full overflow-x-auto thumbnail-scroll px-5 py-2.5 flex items-center gap-3 transition-opacity ${mode === "crop" ? "opacity-40 pointer-events-none" : ""}`}>
           {/* 追加圖片按鈕 (固定最左側) */}
           <button
             onClick={() => appendInputRef.current?.click()}

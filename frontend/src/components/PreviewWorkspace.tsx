@@ -76,7 +76,7 @@ export function PreviewWorkspace({
       <div className="flex flex-col items-center justify-center relative" style={{ maxWidth: "100%", maxHeight: "100%" }}>
         {/* 外層容器：裁切視窗，overflow:hidden 實現裁切效果 */}
         <div
-          className="relative rounded-lg overflow-hidden"
+          className="relative overflow-hidden"
           style={{
             width: displayW,
             height: displayH,
@@ -130,13 +130,13 @@ export function PreviewWorkspace({
   return (
     <div className="flex flex-col items-center justify-center relative" style={{ maxWidth: "100%", maxHeight: "100%" }}>
       {isProcessing && (
-        <div className="absolute inset-0 bg-preview/70 flex items-center justify-center z-10 rounded-lg">
+        <div className="absolute inset-0 bg-preview/70 flex items-center justify-center z-10">
           <p className="text-gray-500">處理中...</p>
         </div>
       )}
 
       <div
-        className="relative rounded-lg overflow-hidden"
+        className="relative overflow-hidden"
         style={{
           backgroundImage: `
             linear-gradient(45deg, #c0c0c0 25%, transparent 25%),

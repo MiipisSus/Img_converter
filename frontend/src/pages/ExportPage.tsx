@@ -405,10 +405,6 @@ export function ExportPage({
         {/* 頂部: 標題 */}
         <div className="p-4 pb-2">
           <h1 className="text-lg font-bold text-white">圖片處理工具</h1>
-          <p className="text-xs text-white/70 mt-1 font-mono">
-            {pipelineState.imageInfo.naturalWidth} ×{" "}
-            {pipelineState.imageInfo.naturalHeight} px
-          </p>
         </div>
 
         {/* 中部: 輸出設定面板 */}
