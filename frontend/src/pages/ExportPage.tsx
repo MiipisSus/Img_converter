@@ -24,6 +24,16 @@ export function ExportPage({
   const unifiedOutputRef = useRef(unifiedOutput);
   unifiedOutputRef.current = unifiedOutput;
 
+  // ── 限制檔案大小的範圍：單張 / 全部 ──
+  const [targetKBScope, setTargetKBScope] = useState<"single" | "all">("single");
+  const targetKBScopeRef = useRef(targetKBScope);
+  targetKBScopeRef.current = targetKBScope;
+  const handleSetTargetKBScope = useCallback((scope: "single" | "all") => {
+    targetKBScopeRef.current = scope;
+    setTargetKBScope(scope);
+  }, []);
+
+
   // ── 預覽區域容器尺寸追蹤 ──
   const previewContainerRef = useRef<HTMLDivElement>(null);
   const [viewportSize, setViewportSize] = useState({ width: 800, height: 600 });
@@ -132,10 +142,38 @@ export function ExportPage({
         // 開啟時：將當前格式/品質廣播到所有圖片
         const s = outputSettingsRef.current;
         broadcastFormatQuality({ exportFormat: s.format, exportQuality: s.quality });
+      } else {
+        // 關閉時：強制 scope 為單張
+        handleSetTargetKBScope("single");
       }
       return !prev;
     });
-  }, [broadcastFormatQuality]);
+  }, [broadcastFormatQuality, handleSetTargetKBScope]);
+
+  // ── 重置匯出格式 ──
+  const handleResetFormat = useCallback(() => {
+    const defaults = { format: "png" as const, quality: 92, enableTargetKB: false, targetKB: null };
+    setOutputSettings((prev) => ({ ...prev, ...defaults }));
+    if (unifiedOutputRef.current) {
+      // 統一輸出 ON：重置所有圖片
+      setImages((prev) =>
+        prev.map((img) => ({
+          ...img,
+          exportFormat: undefined,
+          exportQuality: undefined,
+        })),
+      );
+    } else {
+      // 統一輸出 OFF：僅重置當前圖片
+      setImages((prev) =>
+        prev.map((img) =>
+          img.id === activeImageId
+            ? { ...img, exportFormat: undefined, exportQuality: undefined }
+            : img,
+        ),
+      );
+    }
+  }, [setImages, activeImageId]);
 
   // ── 檔案大小預估 ──
   const mathEstimates = useMemo(() => {
@@ -177,10 +215,16 @@ export function ExportPage({
     if (isEstimating) return;
     setIsEstimating(true);
     try {
-      const targetBytes =
-        outputSettings.enableTargetKB && outputSettings.targetKB
-          ? outputSettings.targetKB * 1024
-          : null;
+      const os = outputSettingsRef.current;
+      const hasLimit = os.enableTargetKB && os.targetKB;
+      let targetBytes: number | null = null;
+      if (hasLimit) {
+        const totalBytes = os.targetKB! * 1024;
+        targetBytes =
+          targetKBScopeRef.current === "all"
+            ? Math.floor(totalBytes / images.length)
+            : totalBytes;
+      }
       const newRealSizes: Record<string, number> = {};
       for (const img of images) {
         const cs = getCroppedOriginalSize(
@@ -189,8 +233,8 @@ export function ExportPage({
         );
         const tw = img.pipelineState.resize.targetWidth || cs.width;
         const th = img.pipelineState.resize.targetHeight || cs.height;
-        const fmt = img.exportFormat ?? outputSettings.format;
-        const q = (img.exportQuality ?? outputSettings.quality) / 100;
+        const fmt = img.exportFormat ?? os.format;
+        const q = (img.exportQuality ?? os.quality) / 100;
         const mime =
           fmt === "png" ? "image/png" : fmt === "jpeg" ? "image/jpeg" : "image/webp";
 
@@ -214,10 +258,16 @@ export function ExportPage({
     setIsDownloading(true);
     try {
       const isMulti = images.length > 1;
-      const targetBytes =
-        outputSettings.enableTargetKB && outputSettings.targetKB
-          ? outputSettings.targetKB * 1024
-          : null;
+      const os = outputSettingsRef.current;
+      const hasLimit = os.enableTargetKB && os.targetKB;
+      let targetBytes: number | null = null;
+      if (hasLimit) {
+        const totalBytes = os.targetKB! * 1024;
+        targetBytes =
+          targetKBScopeRef.current === "all"
+            ? Math.floor(totalBytes / images.length)
+            : totalBytes;
+      }
 
       // 為所有圖片即時生成 blob (帶正確的格式/品質/尺寸，含 targetKB 限制)
       const allResults = await Promise.all(
@@ -228,13 +278,13 @@ export function ExportPage({
           );
           const isActive = img.id === activeImageId;
           const tw = isActive
-            ? outputSettings.targetWidth
+            ? os.targetWidth
             : (img.pipelineState.resize.targetWidth || cs.width);
           const th = isActive
-            ? outputSettings.targetHeight
+            ? os.targetHeight
             : (img.pipelineState.resize.targetHeight || cs.height);
-          const fmt = img.exportFormat ?? outputSettings.format;
-          const q = (img.exportQuality ?? outputSettings.quality) / 100;
+          const fmt = img.exportFormat ?? os.format;
+          const q = (img.exportQuality ?? os.quality) / 100;
           const mime =
             fmt === "png" ? "image/png" : fmt === "jpeg" ? "image/jpeg" : "image/webp";
 
@@ -319,6 +369,9 @@ export function ExportPage({
             onDownloadFormatChange={setDownloadFormat}
             onDownload={handleDownload}
             isDownloading={isDownloading}
+            targetKBScope={targetKBScope}
+            onTargetKBScopeChange={handleSetTargetKBScope}
+            onResetFormat={handleResetFormat}
           />
         </div>
       </aside>
@@ -419,6 +472,9 @@ function OutputSettingsPanel({
   onDownloadFormatChange,
   onDownload,
   isDownloading,
+  targetKBScope,
+  onTargetKBScopeChange,
+  onResetFormat,
 }: {
   images: ImageItem[];
   settings: OutputSettings;
@@ -434,6 +490,9 @@ function OutputSettingsPanel({
   onDownloadFormatChange: (format: "image" | "pdf") => void;
   onDownload: () => void;
   isDownloading: boolean;
+  targetKBScope: "single" | "all";
+  onTargetKBScopeChange: (scope: "single" | "all") => void;
+  onResetFormat: () => void;
 }) {
   const [widthInput, setWidthInput] = useState(String(settings.targetWidth));
   const [heightInput, setHeightInput] = useState(String(settings.targetHeight));
@@ -544,7 +603,17 @@ function OutputSettingsPanel({
 
       {/* 調整尺寸 (始終獨立，不受統一輸出影響) */}
       <div className="bg-white/10 rounded-[10px] p-3">
-        <p className="text-xs text-white/70 mb-3 font-medium">調整尺寸</p>
+        <div className="flex items-center justify-between mb-3">
+          <p className="text-xs text-white/70 font-medium">調整尺寸</p>
+          {isModified && (
+            <button
+              onClick={handleResetSize}
+              className="text-[11px] text-white/50 hover:text-white transition-colors"
+            >
+              重置
+            </button>
+          )}
+        </div>
 
         {/* 寬度輸入 */}
         <div className="flex items-center gap-2 mb-2">
@@ -612,14 +681,15 @@ function OutputSettingsPanel({
           </button>
         </div>
 
-        {isModified && (
-          <button
-            onClick={handleResetSize}
-            className="w-full px-3 py-1.5 text-sm text-white/70 hover:text-white border border-white/20 rounded-[10px] transition-colors"
-          >
-            重設為原始尺寸
-          </button>
-        )}
+        {/* 尺寸資訊 */}
+        <div className="text-xs text-white/50 font-mono mt-2 space-y-0.5">
+          <div>原始: {baseWidth} × {baseHeight} px</div>
+          {isModified && (
+            <div className="text-highlight/80">
+              輸出: {settings.targetWidth} × {settings.targetHeight} px
+            </div>
+          )}
+        </div>
       </div>
 
       {/* 統一輸出開關 (多圖時顯示，位於匯出格式上方) */}
@@ -650,13 +720,27 @@ function OutputSettingsPanel({
           downloadFormat === "pdf" ? "opacity-40 pointer-events-none" : ""
         }`}
       >
-        <p className="text-xs text-white/70 mb-3 font-medium">匯出格式</p>
+        <div className="flex items-center justify-between mb-3">
+          <p className="text-xs text-white/70 font-medium">匯出格式</p>
+          {(format !== "png" || settings.quality !== 92 || settings.enableTargetKB) && (
+            <button
+              onClick={onResetFormat}
+              className="text-[11px] text-white/50 hover:text-white transition-colors"
+            >
+              重置
+            </button>
+          )}
+        </div>
 
         <div className="flex gap-2 mb-3">
           {(["png", "jpeg", "webp"] as const).map((fmt) => (
             <button
               key={fmt}
-              onClick={() => onUpdateSettings({ format: fmt })}
+              onClick={() => {
+                onUpdateSettings({ format: fmt });
+                // auto-estimate deferred to next tick after state update
+                setTimeout(() => onBatchEstimate(), 0);
+              }}
               className={`flex-1 px-2 py-1.5 text-sm rounded-[10px] transition-colors ${
                 format === fmt
                   ? "bg-highlight text-black font-medium"
@@ -716,6 +800,8 @@ function OutputSettingsPanel({
                   step={1}
                   value={settings.quality}
                   onChange={(e) => onUpdateSettings({ quality: parseInt(e.target.value) })}
+                  onMouseUp={() => setTimeout(() => onBatchEstimate(), 0)}
+                  onTouchEnd={() => setTimeout(() => onBatchEstimate(), 0)}
                   className="w-full slider-dark"
                 />
                 <div className="flex justify-between text-[10px] text-white/60 mt-0.5">
@@ -726,42 +812,73 @@ function OutputSettingsPanel({
             )}
 
             {settings.enableTargetKB && (
-              <div className="flex items-center gap-2">
-                <span className="text-xs text-white/70">目標</span>
-                <input
-                  type="number"
-                  min={1}
-                  max={10000}
-                  value={settings.targetKB ?? ""}
-                  onChange={(e) => {
-                    const val = parseInt(e.target.value);
-                    onUpdateSettings({
-                      targetKB: isNaN(val) ? null : Math.max(1, val),
-                    });
-                  }}
-                  placeholder="KB"
-                  className="w-20 px-2 py-1 text-sm input-dark"
-                />
-                <span className="text-xs text-white/60">KB</span>
+              <div className="space-y-2">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-white/70 shrink-0">目標</span>
+                  <input
+                    type="number"
+                    min={1}
+                    max={10000}
+                    value={settings.targetKB ?? ""}
+                    onChange={(e) => {
+                      const val = parseInt(e.target.value);
+                      onUpdateSettings({
+                        targetKB: isNaN(val) ? null : Math.max(1, val),
+                      });
+                    }}
+                    onBlur={() => {
+                      if (settings.targetKB) onBatchEstimate();
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+                    }}
+                    placeholder="KB"
+                    className="w-20 px-2 py-1 text-sm input-dark"
+                  />
+                  <span className="text-xs text-white/60 shrink-0">KB</span>
+
+                  {/* 範圍切換：單張 / 全部 (放在 KB 右側) */}
+                  {images.length > 1 && (
+                    <div className={`flex gap-0.5 bg-white/5 rounded-md p-0.5 shrink-0 ml-auto ${
+                      !unifiedOutput ? "opacity-40 pointer-events-none" : ""
+                    }`}>
+                      {(
+                        [
+                          ["single", "單張"],
+                          ["all", "全部"],
+                        ] as const
+                      ).map(([val, label]) => (
+                        <button
+                          key={val}
+                          onClick={() => {
+                            onTargetKBScopeChange(val);
+                            if (settings.targetKB) onBatchEstimate();
+                          }}
+                          className={`px-2 py-0.5 text-[11px] rounded transition-colors ${
+                            targetKBScope === val
+                              ? "bg-white/20 text-white font-medium"
+                              : "text-white/70 hover:text-white"
+                          }`}
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* 說明文字 */}
+                {images.length > 1 && (
+                  <p className="text-[10px] text-white/50">
+                    {targetKBScope === "single"
+                      ? "每張圖片各自 ≤ 限制大小"
+                      : downloadFormat === "pdf"
+                        ? "PDF 總檔案 ≤ 限制大小"
+                        : "ZIP 總檔案 ≤ 限制大小"}
+                  </p>
+                )}
               </div>
             )}
-          </div>
-        )}
-      </div>
-
-      {/* 狀態資訊 */}
-      <div className="text-xs text-white/70 font-mono space-y-1 p-2">
-        <div>
-          原始尺寸: {baseWidth} × {baseHeight} px
-        </div>
-        {isModified && (
-          <div className="text-highlight">
-            輸出尺寸: {settings.targetWidth} × {settings.targetHeight} px
-          </div>
-        )}
-        {settings.lastExportSize !== null && (
-          <div className="text-highlight/70">
-            檔案大小: {(settings.lastExportSize / 1024).toFixed(1)} KB
           </div>
         )}
       </div>
