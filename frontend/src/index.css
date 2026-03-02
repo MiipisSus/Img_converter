@@ -62,6 +62,74 @@ input[type="range"].slider-dark::-moz-range-thumb {
   box-shadow: 0 0 14px rgba(255, 255, 255, 0.45);
 }
 
+/* Video trim double range slider */
+.trim-slider {
+  position: relative;
+  height: 32px;
+  user-select: none;
+}
+
+.trim-slider__track {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  right: 0;
+  height: 6px;
+  transform: translateY(-50%);
+  background: #747474;
+  border-radius: 3px;
+}
+
+.trim-slider__range {
+  position: absolute;
+  top: 50%;
+  height: 6px;
+  transform: translateY(-50%);
+  background: #00B4FF;
+  border-radius: 3px;
+}
+
+.trim-slider__thumb {
+  position: absolute;
+  top: 50%;
+  width: 18px;
+  height: 18px;
+  transform: translate(-50%, -50%);
+  background: #00B4FF;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  cursor: grab;
+  box-shadow: 0 0 6px rgba(0, 180, 255, 0.5);
+  z-index: 2;
+  transition: box-shadow 0.15s;
+}
+
+.trim-slider__thumb:hover {
+  box-shadow: 0 0 12px rgba(0, 180, 255, 0.7);
+}
+
+.trim-slider__thumb:active {
+  cursor: grabbing;
+  box-shadow: 0 0 16px rgba(0, 180, 255, 0.9);
+}
+
+.trim-slider__playhead {
+  position: absolute;
+  top: 50%;
+  width: 3px;
+  height: 22px;
+  transform: translate(-50%, -50%);
+  background: #fff;
+  border-radius: 1.5px;
+  z-index: 1;
+  pointer-events: none;
+}
+
+/* Blue glow on hover */
+.btn-vic:hover {
+  box-shadow: 0 0 14px rgba(0, 180, 255, 0.45);
+}
+
 /* Number input in dark theme */
 input[type="number"].input-dark {
   background: rgba(255, 255, 255, 0.08);
