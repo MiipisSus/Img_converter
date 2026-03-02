@@ -57,6 +57,11 @@ input[type="range"].slider-dark::-moz-range-thumb {
   box-shadow: 0 0 14px rgba(212, 255, 63, 0.45);
 }
 
+/* White glow on hover */
+.btn-white:hover {
+  box-shadow: 0 0 14px rgba(255, 255, 255, 0.45);
+}
+
 /* Number input in dark theme */
 input[type="number"].input-dark {
   background: rgba(255, 255, 255, 0.08);

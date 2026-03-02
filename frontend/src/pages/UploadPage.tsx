@@ -197,10 +197,10 @@ export function UploadPage({ onImagesLoaded, onVideoLoaded }: UploadPageProps) {
               dragHint === "image"
                 ? "border-highlight bg-highlight/10 scale-[1.02]"
                 : dragHint === "video"
-                  ? "border-[#3fb8ff] bg-[#3fb8ff]/10 scale-[1.02]"
+                  ? "border-[#00B4FF] bg-[#00B4FF]/10 scale-[1.02]"
                   : dragHint === "mixed"
                     ? "border-red-400 bg-red-400/10 scale-[1.02]"
-                    : "border-gray-400 hover:border-highlight/60 hover:bg-preview/10"
+                    : "border-gray-400 hover:border-gray-50 hover:bg-preview/10"
             }`}
           >
             {isDragging ? (
@@ -210,7 +210,7 @@ export function UploadPage({ onImagesLoaded, onVideoLoaded }: UploadPageProps) {
                   dragHint === "image"
                     ? "text-highlight"
                     : dragHint === "video"
-                      ? "text-[#3fb8ff]"
+                      ? "text-[#00B4FF]"
                       : "text-red-400"
                 }`}
               >
@@ -235,7 +235,7 @@ export function UploadPage({ onImagesLoaded, onVideoLoaded }: UploadPageProps) {
                 <span className="text-base text-gray-500">
                   拖放圖片或影片至此
                 </span>
-                <div className="px-8 py-3 bg-highlight text-black font-bold rounded-[10px] transition-all btn-highlight hover:brightness-110 text-lg">
+                <div className="px-8 py-3 bg-white text-black font-bold rounded-[10px] transition-all btn-white hover:brightness-110 text-lg">
                   選擇檔案
                 </div>
                 <p className="text-sm text-gray-500">
