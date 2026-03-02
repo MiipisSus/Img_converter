@@ -61,12 +61,19 @@ export function loadImageFile(file: File): Promise<ImageItem> {
           outputHeight: croppedSize.height,
         };
 
+        const originalFormat: "png" | "jpeg" | "webp" =
+          file.type === "image/jpeg" ? "jpeg"
+          : file.type === "image/webp" ? "webp"
+          : "png";
+
         resolve({
           id: crypto.randomUUID(),
           src,
           imgElement: img,
           pipelineState: initialPipeline,
           visualBaseRotate: 0,
+          originalMimeType: file.type,
+          originalFormat,
         });
       };
       img.onerror = () => reject(new Error("圖片載入失敗"));

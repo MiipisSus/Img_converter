@@ -3,7 +3,7 @@ import { PreviewWorkspace } from "../components/PreviewWorkspace";
 import { DarkEditableNumber } from "../components/DarkEditableNumber";
 import { generateCroppedImage } from "../utils/generateCroppedImage";
 import { getCroppedOriginalSize } from "../utils/containerParams";
-import type { OutputSettings, ImageItem } from "../types";
+import type { OutputSettings, ImageItem, ExportFormat } from "../types";
 
 interface ExportPageProps {
   images: ImageItem[];
@@ -20,7 +20,7 @@ export function ExportPage({
   setImages,
   onReturn,
 }: ExportPageProps) {
-  const [unifiedOutput, setUnifiedOutput] = useState(true);
+  const [unifiedOutput, setUnifiedOutput] = useState(false);
   const unifiedOutputRef = useRef(unifiedOutput);
   unifiedOutputRef.current = unifiedOutput;
 
@@ -66,6 +66,10 @@ export function ExportPage({
   const { pipelineState } = activeImage;
   const imageSrc = activeImage.src;
 
+  // ── activeImageId ref (供 callback 中即時讀取) ──
+  const activeImageIdRef = useRef(activeImageId);
+  activeImageIdRef.current = activeImageId;
+
   // ── 輸出設定 (local state) ──
   const [outputSettings, setOutputSettings] = useState<OutputSettings>(() => {
     const croppedSize = getCroppedOriginalSize(pipelineState.editorState, pipelineState.imageInfo);
@@ -73,7 +77,7 @@ export function ExportPage({
       targetWidth: croppedSize.width,
       targetHeight: croppedSize.height,
       lockAspectRatio: true,
-      format: "png",
+      format: activeImage.originalFormat,
       baseWidth: croppedSize.width,
       baseHeight: croppedSize.height,
       quality: 92,
@@ -84,6 +88,17 @@ export function ExportPage({
   });
   const outputSettingsRef = useRef(outputSettings);
   outputSettingsRef.current = outputSettings;
+
+  // ── 進入頁面初始化：將每張圖的 exportFormat 設為其 originalFormat ──
+  useEffect(() => {
+    setImages((prev) =>
+      prev.map((img) => ({
+        ...img,
+        exportFormat: img.originalFormat,
+      })),
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // intentional: only on mount
 
   // ── 切換 activeImage 時同步 local settings ──
   const prevActiveIdRef = useRef(activeImageId);
@@ -103,12 +118,19 @@ export function ExportPage({
       targetWidth: img.pipelineState.resize.targetWidth || croppedSize.width,
       targetHeight: img.pipelineState.resize.targetHeight || croppedSize.height,
       lastExportSize: img.pipelineState.previewBlob?.size ?? null,
+      // 統一輸出 OFF 時，跟隨該圖片的 format/quality
+      ...(!unifiedOutputRef.current && img.exportFormat
+        ? { format: img.exportFormat }
+        : {}),
+      ...(!unifiedOutputRef.current && img.exportQuality !== undefined
+        ? { quality: img.exportQuality }
+        : {}),
     }));
   }, [activeImageId, images]);
 
   // ── 廣播格式/品質到所有圖片 ──
   const broadcastFormatQuality = useCallback(
-    (updates: { exportFormat?: "png" | "jpeg" | "webp"; exportQuality?: number }) => {
+    (updates: { exportFormat?: ExportFormat; exportQuality?: number }) => {
       setImages((prev) =>
         prev.map((img) => ({
           ...img,
@@ -120,19 +142,35 @@ export function ExportPage({
     [setImages],
   );
 
-  // ── 更新輸出設定 (format/quality 在統一輸出 ON 時立即廣播) ──
+  // ── 更新輸出設定 (format/quality 同步到圖片) ──
   const handleUpdateOutputSettings = useCallback(
     (updates: Partial<OutputSettings>) => {
       setOutputSettings((prev) => ({ ...prev, ...updates }));
-      if (!unifiedOutputRef.current) return;
-      if (updates.format !== undefined) {
-        broadcastFormatQuality({ exportFormat: updates.format });
-      }
-      if (updates.quality !== undefined) {
-        broadcastFormatQuality({ exportQuality: updates.quality });
+      if (unifiedOutputRef.current) {
+        // 統一輸出 ON：廣播到所有圖片
+        if (updates.format !== undefined) {
+          broadcastFormatQuality({ exportFormat: updates.format });
+        }
+        if (updates.quality !== undefined) {
+          broadcastFormatQuality({ exportQuality: updates.quality });
+        }
+      } else {
+        // 統一輸出 OFF：僅更新當前圖片
+        const imgUpdates: Partial<ImageItem> = {};
+        if (updates.format !== undefined) imgUpdates.exportFormat = updates.format;
+        if (updates.quality !== undefined) imgUpdates.exportQuality = updates.quality;
+        if (Object.keys(imgUpdates).length > 0) {
+          setImages((prev) =>
+            prev.map((img) =>
+              img.id === activeImageIdRef.current
+                ? { ...img, ...imgUpdates }
+                : img,
+            ),
+          );
+        }
       }
     },
-    [broadcastFormatQuality],
+    [broadcastFormatQuality, setImages],
   );
 
   // ── 統一輸出開關 ──
@@ -152,28 +190,43 @@ export function ExportPage({
 
   // ── 重置匯出格式 ──
   const handleResetFormat = useCallback(() => {
-    const defaults = { format: "png" as const, quality: 92, enableTargetKB: false, targetKB: null };
-    setOutputSettings((prev) => ({ ...prev, ...defaults }));
     if (unifiedOutputRef.current) {
-      // 統一輸出 ON：重置所有圖片
+      // 統一輸出 ON：重置所有圖片回各自原始格式
       setImages((prev) =>
         prev.map((img) => ({
           ...img,
-          exportFormat: undefined,
+          exportFormat: img.originalFormat,
           exportQuality: undefined,
         })),
       );
+      // UI 格式跟隨當前活動圖片
+      const activeImg = images.find((i) => i.id === activeImageIdRef.current);
+      setOutputSettings((prev) => ({
+        ...prev,
+        format: activeImg?.originalFormat ?? "png",
+        quality: 92,
+        enableTargetKB: false,
+        targetKB: null,
+      }));
     } else {
       // 統一輸出 OFF：僅重置當前圖片
+      const activeImg = images.find((i) => i.id === activeImageIdRef.current);
       setImages((prev) =>
         prev.map((img) =>
-          img.id === activeImageId
-            ? { ...img, exportFormat: undefined, exportQuality: undefined }
+          img.id === activeImageIdRef.current
+            ? { ...img, exportFormat: img.originalFormat, exportQuality: undefined }
             : img,
         ),
       );
+      setOutputSettings((prev) => ({
+        ...prev,
+        format: activeImg?.originalFormat ?? "png",
+        quality: 92,
+        enableTargetKB: false,
+        targetKB: null,
+      }));
     }
-  }, [setImages, activeImageId]);
+  }, [setImages, images]);
 
   // ── 檔案大小預估 ──
   const mathEstimates = useMemo(() => {
@@ -182,9 +235,10 @@ export function ExportPage({
       const cs = getCroppedOriginalSize(img.pipelineState.editorState, img.pipelineState.imageInfo);
       const w = img.pipelineState.resize.targetWidth || cs.width;
       const h = img.pipelineState.resize.targetHeight || cs.height;
+      const { fmt } = resolveFormat(img.exportFormat ?? outputSettings.format, img.originalMimeType);
       sizes[img.id] = estimateFileSize(
         w, h,
-        img.exportFormat ?? outputSettings.format,
+        fmt,
         img.exportQuality ?? outputSettings.quality,
       );
     }
@@ -233,10 +287,8 @@ export function ExportPage({
         );
         const tw = img.pipelineState.resize.targetWidth || cs.width;
         const th = img.pipelineState.resize.targetHeight || cs.height;
-        const fmt = img.exportFormat ?? os.format;
+        const { mime } = resolveFormat(img.exportFormat ?? os.format, img.originalMimeType);
         const q = (img.exportQuality ?? os.quality) / 100;
-        const mime =
-          fmt === "png" ? "image/png" : fmt === "jpeg" ? "image/jpeg" : "image/webp";
 
         const blob = await generateImageBlobWithLimit(img, tw, th, mime, q, targetBytes);
         newRealSizes[img.id] = blob.size;
@@ -248,6 +300,15 @@ export function ExportPage({
       setIsEstimating(false);
     }
   };
+
+  // ── 進入頁面自動估算 (deferred 確保 exportFormat 已初始化) ──
+  const handleBatchEstimateRef = useRef(handleBatchEstimate);
+  handleBatchEstimateRef.current = handleBatchEstimate;
+  useEffect(() => {
+    const timer = setTimeout(() => handleBatchEstimateRef.current(), 100);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // intentional: only on mount
 
   // ── 下載邏輯 (即時生成 blob，帶正確輸出格式) ──
   const [downloadFormat, setDownloadFormat] = useState<"image" | "pdf">("image");
@@ -283,10 +344,8 @@ export function ExportPage({
           const th = isActive
             ? os.targetHeight
             : (img.pipelineState.resize.targetHeight || cs.height);
-          const fmt = img.exportFormat ?? os.format;
+          const { fmt, mime } = resolveFormat(img.exportFormat ?? os.format, img.originalMimeType);
           const q = (img.exportQuality ?? os.quality) / 100;
-          const mime =
-            fmt === "png" ? "image/png" : fmt === "jpeg" ? "image/jpeg" : "image/webp";
 
           const blob = await generateImageBlobWithLimit(img, tw, th, mime, q, targetBytes);
           return { blob, ext: fmt };
@@ -372,6 +431,7 @@ export function ExportPage({
             targetKBScope={targetKBScope}
             onTargetKBScopeChange={handleSetTargetKBScope}
             onResetFormat={handleResetFormat}
+            originalFormat={activeImage.originalFormat}
           />
         </div>
       </aside>
@@ -475,6 +535,7 @@ function OutputSettingsPanel({
   targetKBScope,
   onTargetKBScopeChange,
   onResetFormat,
+  originalFormat,
 }: {
   images: ImageItem[];
   settings: OutputSettings;
@@ -493,6 +554,7 @@ function OutputSettingsPanel({
   targetKBScope: "single" | "all";
   onTargetKBScopeChange: (scope: "single" | "all") => void;
   onResetFormat: () => void;
+  originalFormat: "png" | "jpeg" | "webp";
 }) {
   const [widthInput, setWidthInput] = useState(String(settings.targetWidth));
   const [heightInput, setHeightInput] = useState(String(settings.targetHeight));
@@ -721,8 +783,13 @@ function OutputSettingsPanel({
         }`}
       >
         <div className="flex items-center justify-between mb-3">
-          <p className="text-xs text-white/70 font-medium">匯出格式</p>
-          {(format !== "png" || settings.quality !== 92 || settings.enableTargetKB) && (
+          <div className="flex items-center gap-2">
+            <p className="text-xs text-white/70 font-medium">匯出格式</p>
+            <span className="text-[10px] text-white/30">
+              原始：{originalFormat.toUpperCase()}
+            </span>
+          </div>
+          {(format !== originalFormat || settings.quality !== 92 || settings.enableTargetKB) && (
             <button
               onClick={onResetFormat}
               className="text-[11px] text-white/50 hover:text-white transition-colors"
@@ -733,24 +800,30 @@ function OutputSettingsPanel({
         </div>
 
         <div className="flex gap-2 mb-3">
-          {(["png", "jpeg", "webp"] as const).map((fmt) => (
-            <button
-              key={fmt}
-              onClick={() => {
-                onUpdateSettings({ format: fmt });
-                // auto-estimate deferred to next tick after state update
-                setTimeout(() => onBatchEstimate(), 0);
-              }}
-              className={`flex-1 px-2 py-1.5 text-sm rounded-[10px] transition-colors ${
-                format === fmt
-                  ? "bg-highlight text-black font-medium"
-                  : "bg-white/10 text-white/80 hover:bg-white/20"
-              }`}
-            >
-              {fmt.toUpperCase()}
-            </button>
-          ))}
+          {(["original", "png", "jpeg", "webp"] as const).map((fmt) => {
+            const label = fmt === "original" ? "原始" : fmt.toUpperCase();
+            return (
+              <button
+                key={fmt}
+                onClick={() => {
+                  onUpdateSettings({ format: fmt });
+                  setTimeout(() => onBatchEstimate(), 0);
+                }}
+                className={`flex-1 px-2 py-1.5 text-sm rounded-[10px] transition-colors ${
+                  format === fmt
+                    ? "bg-highlight text-black font-medium"
+                    : "bg-white/10 text-white/80 hover:bg-white/20"
+                }`}
+              >
+                {label}
+              </button>
+            );
+          })}
         </div>
+
+        {format === "original" && (
+          <p className="text-xs text-white/60 mb-3">保留上傳時的檔案類型</p>
+        )}
 
         {format === "png" && (
           <p className="text-xs text-white/60 mb-3">PNG 為無損格式，不支援品質調整</p>
@@ -937,6 +1010,23 @@ function OutputSettingsPanel({
 // ============================================================
 // Helpers
 // ============================================================
+
+/**
+ * 將 ExportFormat (含 "original") 解析為圖片實際的 format/mime。
+ * Canvas toBlob 僅支援 png/jpeg/webp，其餘原始格式 fallback 為 png。
+ */
+function resolveFormat(
+  format: ExportFormat,
+  originalMimeType: string,
+): { fmt: "png" | "jpeg" | "webp"; mime: "image/png" | "image/jpeg" | "image/webp" } {
+  if (format !== "original") {
+    const mime = format === "png" ? "image/png" : format === "jpeg" ? "image/jpeg" : "image/webp";
+    return { fmt: format, mime };
+  }
+  if (originalMimeType === "image/jpeg") return { fmt: "jpeg", mime: "image/jpeg" };
+  if (originalMimeType === "image/webp") return { fmt: "webp", mime: "image/webp" };
+  return { fmt: "png", mime: "image/png" };
+}
 
 /** 數學公式估算檔案大小 (bytes) */
 function estimateFileSize(

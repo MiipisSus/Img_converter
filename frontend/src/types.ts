@@ -26,6 +26,9 @@ export interface PipelineState {
   outputHeight: number;
 }
 
+/** 匯出格式類型 (含原始格式) */
+export type ExportFormat = "png" | "jpeg" | "webp" | "original";
+
 /** 多圖管理的單一圖片項目 */
 export interface ImageItem {
   id: string;
@@ -34,8 +37,12 @@ export interface ImageItem {
   pipelineState: PipelineState;
   /** 累積視覺旋轉角度 (不取模，用於 CSS 平滑動畫避免 270°→0° 反向插值) */
   visualBaseRotate: number;
+  /** 原始檔案的 MIME Type (例如 image/jpeg) */
+  originalMimeType: string;
+  /** 原始格式 (由 MIME Type 解析，僅 png/jpeg/webp，其餘 fallback 為 png) */
+  originalFormat: "png" | "jpeg" | "webp";
   /** 輸出格式 (ExportPage 統一輸出用) */
-  exportFormat?: "png" | "jpeg" | "webp";
+  exportFormat?: ExportFormat;
   /** 輸出品質 0-100 (ExportPage 統一輸出用) */
   exportQuality?: number;
 }
@@ -45,7 +52,7 @@ export interface OutputSettings {
   targetWidth: number;
   targetHeight: number;
   lockAspectRatio: boolean;
-  format: "png" | "jpeg" | "webp";
+  format: ExportFormat;
   /** 基準尺寸 (進入輸出模式時的裁切尺寸) */
   baseWidth: number;
   baseHeight: number;
