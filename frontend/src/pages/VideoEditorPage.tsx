@@ -9,6 +9,7 @@ import vicLogo from "../assets/vic_logo.png";
 
 interface VideoEditorPageProps {
   video: VideoItem;
+  onExport: (state: { clipConfig: ClipExportConfig | null; rotate: number; flipH: boolean; flipV: boolean }) => void;
   onReset: () => void;
 }
 
@@ -311,7 +312,7 @@ function TrimSlider({
 type EditorMode = "default" | "clip";
 type CropResizeHandle = "nw" | "ne" | "sw" | "se" | "n" | "s" | "e" | "w";
 
-export function VideoEditorPage({ video, onReset }: VideoEditorPageProps) {
+export function VideoEditorPage({ video, onExport, onReset }: VideoEditorPageProps) {
   // ── 影片資訊 ──
   const [videoInfo, setVideoInfo] = useState<VideoInfoResult | null>(null);
   const [loading, setLoading] = useState(true);
@@ -1226,6 +1227,19 @@ export function VideoEditorPage({ video, onReset }: VideoEditorPageProps) {
               className="w-full px-4 py-2 text-white/80 hover:text-white text-md transition-colors"
             >
               返回
+            </button>
+          )}
+          {mode === "default" && (
+            <button
+              onClick={() => onExport({
+                clipConfig: exportConfig,
+                rotate: baseRotate,
+                flipH: flipX,
+                flipV: flipY,
+              })}
+              className="w-full px-4 py-3 bg-[#00B4FF] text-white font-bold rounded-[10px] transition-all btn-vic"
+            >
+              匯出影片
             </button>
           )}
           {mode === "default" && (

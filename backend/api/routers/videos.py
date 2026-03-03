@@ -210,7 +210,12 @@ async def submit_compress(
     end_t: Optional[float] = Form(default=None, ge=0, description="結束時間 (秒)"),
     rotate: int = Form(default=0, description="旋轉角度 (0/90/180/270)"),
     flip_h: bool = Form(default=False, description="是否水平翻轉"),
+    flip_v: bool = Form(default=False, description="是否垂直翻轉"),
     target_w: Optional[int] = Form(default=None, gt=0, description="目標寬度 (高度按比例縮放)"),
+    crop_x: Optional[int] = Form(default=None, ge=0, description="裁切起始 X (像素)"),
+    crop_y: Optional[int] = Form(default=None, ge=0, description="裁切起始 Y (像素)"),
+    crop_w: Optional[int] = Form(default=None, gt=0, description="裁切寬度 (像素)"),
+    crop_h: Optional[int] = Form(default=None, gt=0, description="裁切高度 (像素)"),
 ):
     _validate_video_extension(video.filename or "")
     video_bytes = await video.read()
@@ -249,7 +254,12 @@ async def submit_compress(
         end_t=end_t,
         rotate=rotate,
         flip_h=flip_h,
+        flip_v=flip_v,
         target_w=target_w,
+        crop_x=crop_x,
+        crop_y=crop_y,
+        crop_w=crop_w,
+        crop_h=crop_h,
     )
 
     # ── 建立任務 ──

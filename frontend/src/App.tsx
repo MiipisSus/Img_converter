@@ -4,9 +4,19 @@ import { UploadPage } from "./pages/UploadPage";
 import { EditorPage } from "./pages/EditorPage";
 import { ExportPage } from "./pages/ExportPage";
 import { VideoEditorPage } from "./pages/VideoEditorPage";
+import { VideoExportPage } from "./pages/VideoExportPage";
+import type { ClipExportConfig } from "./pages/VideoEditorPage";
 
 /** 應用模式：上傳頁 / 圖片流程 / 影片流程 */
 type AppMode = "upload" | "pic" | "vic";
+
+/** 影片匯出狀態 */
+export interface VideoExportState {
+  clipConfig: ClipExportConfig | null;
+  rotate: number;
+  flipH: boolean;
+  flipV: boolean;
+}
 
 function App() {
   const [mode, setMode] = useState<AppMode>("upload");
@@ -20,6 +30,8 @@ function App() {
 
   // ── 影片狀態 (vic 模式) ──
   const [video, setVideo] = useState<VideoItem | null>(null);
+  const [vicStep, setVicStep] = useState<"edit" | "export">("edit");
+  const [videoExportState, setVideoExportState] = useState<VideoExportState | null>(null);
 
   // ── 衍生資料 ──
   const activeImage = useMemo(
@@ -90,6 +102,16 @@ function App() {
   const handleVideoLoaded = useCallback((v: VideoItem) => {
     setVideo(v);
     setMode("vic");
+    setVicStep("edit");
+  }, []);
+
+  const handleVideoExport = useCallback((state: VideoExportState) => {
+    setVideoExportState(state);
+    setVicStep("export");
+  }, []);
+
+  const handleVideoReturnToEdit = useCallback(() => {
+    setVicStep("edit");
   }, []);
 
   // ── 回調：返回首頁 (清除所有狀態) ──
@@ -98,6 +120,8 @@ function App() {
     setImages([]);
     setActiveImageId("");
     setVideo(null);
+    setVideoExportState(null);
+    setVicStep("edit");
     setMode("upload");
     setCurrentStep("upload");
   }, []);
@@ -114,10 +138,26 @@ function App() {
     );
   }
 
-  // 影片編輯模式
+  // 影片模式
   if (mode === "vic") {
     if (!video) return null;
-    return <VideoEditorPage video={video} onReset={handleReset} />;
+    if (vicStep === "export" && videoExportState) {
+      return (
+        <VideoExportPage
+          video={video}
+          exportState={videoExportState}
+          onReturn={handleVideoReturnToEdit}
+          onReset={handleReset}
+        />
+      );
+    }
+    return (
+      <VideoEditorPage
+        video={video}
+        onExport={handleVideoExport}
+        onReset={handleReset}
+      />
+    );
   }
 
   // 圖片編輯模式

@@ -35,10 +35,16 @@ class VideoProcessParams:
     end_t: Optional[float] = None
     # 旋轉 (0, 90, 180, 270)
     rotate: int = 0
-    # 水平翻轉
+    # 翻轉
     flip_h: bool = False
+    flip_v: bool = False
     # 目標寬度 (高度按比例縮放，自動對齊偶數)
     target_w: Optional[int] = None
+    # 空間裁切 (原始像素座標)
+    crop_x: Optional[int] = None
+    crop_y: Optional[int] = None
+    crop_w: Optional[int] = None
+    crop_h: Optional[int] = None
 
 
 # ── 解析度對應位元率上限 (kbps) ──
@@ -202,7 +208,7 @@ class VideoService:
             on_progress: 進度回調 fn(percent: int)
         """
         from moviepy import VideoFileClip
-        from moviepy.video.fx import Rotate, MirrorX, Resize, EvenSize
+        from moviepy.video.fx import Crop, Rotate, MirrorX, MirrorY, Resize, EvenSize
 
         if params is None:
             params = VideoProcessParams()
@@ -229,22 +235,34 @@ class VideoService:
                     end_time=end_t,
                 )
 
-            # ── 步驟 2: 旋轉 (expand=True 避免黑邊) ──
+            # ── 步驟 2: 空間裁切 (在旋轉前，座標基於原始影片) ──
+            if params.crop_x is not None and params.crop_w is not None:
+                clip = clip.with_effects([Crop(
+                    x1=params.crop_x, y1=params.crop_y or 0,
+                    x2=params.crop_x + params.crop_w,
+                    y2=(params.crop_y or 0) + (params.crop_h or clip.size[1]),
+                )])
+
+            # ── 步驟 3: 旋轉 (expand=True 避免黑邊) ──
             if params.rotate and params.rotate != 0:
                 clip = clip.with_effects([
                     Rotate(angle=params.rotate, expand=True),
                 ])
 
-            # ── 步驟 3: 水平翻轉 ──
+            # ── 步驟 4: 水平翻轉 ──
             if params.flip_h:
                 clip = clip.with_effects([MirrorX()])
 
-            # ── 步驟 4: 縮放 ──
+            # ── 步驟 4b: 垂直翻轉 ──
+            if params.flip_v:
+                clip = clip.with_effects([MirrorY()])
+
+            # ── 步驟 5: 縮放 ──
             if params.target_w is not None:
                 tw = _ensure_even(params.target_w)
                 clip = clip.with_effects([Resize(width=tw)])
 
-            # ── 步驟 5: 確保偶數解析度 (H.264 硬性要求) ──
+            # ── 步驟 6: 確保偶數解析度 (H.264 硬性要求) ──
             clip = clip.with_effects([EvenSize()])
 
             # 處理後的資訊
@@ -398,7 +416,7 @@ class VideoService:
     ) -> Tuple[bytes, float]:
         """二次壓制：以 0.9 係數降低位元率重新壓縮 (含完整處理管線)"""
         from moviepy import VideoFileClip
-        from moviepy.video.fx import Rotate, MirrorX, Resize, EvenSize
+        from moviepy.video.fx import Crop, Rotate, MirrorX, MirrorY, Resize, EvenSize
 
         reduced_target = int(target_kb * 0.9)
         config = calculate_bitrate(
@@ -431,10 +449,18 @@ class VideoService:
                     start_time=params.start_t or 0,
                     end_time=params.end_t,
                 )
+            if params.crop_x is not None and params.crop_w is not None:
+                clip = clip.with_effects([Crop(
+                    x1=params.crop_x, y1=params.crop_y or 0,
+                    x2=params.crop_x + params.crop_w,
+                    y2=(params.crop_y or 0) + (params.crop_h or clip.size[1]),
+                )])
             if params.rotate and params.rotate != 0:
                 clip = clip.with_effects([Rotate(angle=params.rotate, expand=True)])
             if params.flip_h:
                 clip = clip.with_effects([MirrorX()])
+            if params.flip_v:
+                clip = clip.with_effects([MirrorY()])
             if params.target_w is not None:
                 tw = _ensure_even(params.target_w)
                 clip = clip.with_effects([Resize(width=tw)])

@@ -68,3 +68,93 @@ export async function estimateVideo(
 
   return res.json();
 }
+
+// ─────────────────────────────────────────────
+// 影片匯出 (壓縮 / 狀態 / 下載 / 清理)
+// ─────────────────────────────────────────────
+
+export interface TaskSubmitResult {
+  task_id: string;
+  status: string;
+  estimated_video_bitrate_kbps?: number;
+  estimated_audio_bitrate_kbps?: number;
+  warning?: string;
+}
+
+export interface TaskStatusResult {
+  task_id: string;
+  status: "pending" | "processing" | "completed" | "failed";
+  progress: number;
+  download_url?: string;
+  original_size_kb?: number;
+  output_size_kb?: number;
+  duration?: number;
+  video_bitrate_kbps?: number;
+  audio_bitrate_kbps?: number;
+  warning?: string;
+  error?: string;
+}
+
+export interface CompressOptions {
+  target_kb?: number;
+  output_format?: string;
+  include_audio?: boolean;
+  quality_preset?: string;
+  start_t?: number;
+  end_t?: number;
+  rotate?: number;
+  flip_h?: boolean;
+  flip_v?: boolean;
+  crop_x?: number;
+  crop_y?: number;
+  crop_w?: number;
+  crop_h?: number;
+}
+
+/** 提交影片壓縮任務 */
+export async function submitCompress(
+  file: File,
+  opts: CompressOptions = {},
+): Promise<TaskSubmitResult> {
+  const fd = new FormData();
+  fd.append("video", file);
+  for (const [k, v] of Object.entries(opts)) {
+    if (v !== undefined) fd.append(k, String(v));
+  }
+
+  const res = await fetch(`${API_BASE}/videos/compress`, {
+    method: "POST",
+    body: fd,
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: "提交任務失敗" }));
+    throw new Error(err.detail || `HTTP ${res.status}`);
+  }
+
+  return res.json();
+}
+
+/** 查詢任務狀態 */
+export async function getTaskStatus(taskId: string): Promise<TaskStatusResult> {
+  const res = await fetch(`${API_BASE}/videos/status/${taskId}`);
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: "查詢狀態失敗" }));
+    throw new Error(err.detail || `HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
+/** 下載處理完成的影片 */
+export async function downloadVideo(taskId: string): Promise<Blob> {
+  const res = await fetch(`${API_BASE}/videos/download/${taskId}`);
+  if (!res.ok) {
+    throw new Error("下載失敗");
+  }
+  return res.blob();
+}
+
+/** 清理已完成的任務 */
+export async function cleanupTask(taskId: string): Promise<void> {
+  await fetch(`${API_BASE}/videos/tasks/${taskId}`, { method: "DELETE" });
+}

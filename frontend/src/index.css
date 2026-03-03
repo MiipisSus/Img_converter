@@ -176,3 +176,16 @@ input[type="number"].input-dark:focus {
   outline: none;
   box-shadow: 0 0 0 1px #d4ff3f;
 }
+
+input[type="number"].input-vic {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: #fff;
+  border-radius: 8px;
+}
+
+input[type="number"].input-vic:focus {
+  border-color: #00B4FF;
+  outline: none;
+  box-shadow: 0 0 0 1px #00B4FF;
+}
