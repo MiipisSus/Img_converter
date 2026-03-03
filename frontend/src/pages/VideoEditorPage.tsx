@@ -35,31 +35,56 @@ export interface ClipExportConfig {
 // ─────────────────────────────────────────────
 // getFinalVideoCropArea — UI 座標→原始像素座標 (含偶數修正)
 // ─────────────────────────────────────────────
+//
+// 座標系統 (transform-origin: center center)：
+//   影片元素由 flexbox 居中於容器 → 元素中心 = 容器中心
+//   CSS transform: translate(tx,ty) scale(s)
+//     1. scale(s) 圍繞元素中心縮放
+//     2. translate(tx,ty) 平移
+//   → 影片視覺左上角 = (containerW - videoW*M*s)/2 + tx
+//
+//   容器中某點 (cropX, cropY) 對應的元素佈局座標：
+//     px = (cropX - vx) / scale = relX / scale
+//   轉換為原始像素：
+//     original_x = px / M = relX / (M * scale)
+//
+//   前提：videoW/H、M、CSS 元素尺寸 全部使用同一組尺寸來源
+//         (effectiveVideoW/H — 優先 video.videoWidth，fallback videoInfo)
 
 function getFinalVideoCropArea(
   state: VideoTransformState,
   M: number,
   containerW: number,
   containerH: number,
-  originalW: number,
-  originalH: number,
+  videoW: number,
+  videoH: number,
 ): { x: number; y: number; width: number; height: number } {
   const { scale, translateX: tx, translateY: ty, cropX, cropY, cropW, cropH } = state;
 
-  const vw = originalW * M * scale;
-  const vh = originalH * M * scale;
+  // 影片 CSS 元素的視覺尺寸
+  const vw = videoW * M * scale;
+  const vh = videoH * M * scale;
 
+  // 影片視覺左上角 (transform-origin: center, flexbox 居中)
   const vx = (containerW - vw) / 2 + tx;
   const vy = (containerH - vh) / 2 + ty;
 
+  // 裁切框相對於影片視覺左上角的偏移 (screen px)
   const relX = cropX - vx;
   const relY = cropY - vy;
 
+  // 每個原始像素 = M * scale 個顯示像素
   const pixelScale = M * scale;
-  let x = Math.max(0, Math.min(originalW, Math.round(relX / pixelScale)));
-  let y = Math.max(0, Math.min(originalH, Math.round(relY / pixelScale)));
-  let w = Math.max(2, Math.min(originalW - x, Math.round(cropW / pixelScale)));
-  let h = Math.max(2, Math.min(originalH - y, Math.round(cropH / pixelScale)));
+  let x = Math.max(0, Math.round(relX / pixelScale));
+  let y = Math.max(0, Math.round(relY / pixelScale));
+  let w = Math.max(2, Math.round(cropW / pixelScale));
+  let h = Math.max(2, Math.round(cropH / pixelScale));
+
+  // Clamp 至影片邊界
+  x = Math.min(x, videoW - 2);
+  y = Math.min(y, videoH - 2);
+  w = Math.min(w, videoW - x);
+  h = Math.min(h, videoH - y);
 
   // 偶數修正 — 符合影片編碼規範
   w = Math.floor(w / 2) * 2;
@@ -68,8 +93,8 @@ function getFinalVideoCropArea(
   y = Math.floor(y / 2) * 2;
 
   // 修正後邊界安全檢查
-  if (x + w > originalW) x = originalW - w;
-  if (y + h > originalH) y = originalH - h;
+  if (x + w > videoW) x = videoW - w;
+  if (y + h > videoH) y = videoH - h;
   if (x < 0) x = 0;
   if (y < 0) y = 0;
 
@@ -233,6 +258,12 @@ export function VideoEditorPage({ video, onReset }: VideoEditorPageProps) {
   // ── 已套用的剪輯配置 ──
   const [exportConfig, setExportConfig] = useState<ClipExportConfig | null>(null);
 
+  // ── 預覽區域尺寸 (用於裁切預覽計算) ──
+  const [previewAreaSize, setPreviewAreaSize] = useState({ width: 800, height: 600 });
+
+  // ── 瀏覽器實際解碼的影片解析度 (video.videoWidth/Height) ──
+  const [intrinsicVideoSize, setIntrinsicVideoSize] = useState<{ w: number; h: number } | null>(null);
+
   // ── Refs ──
   const videoRef = useRef<HTMLVideoElement>(null);
   const videoUrlRef = useRef<string>("");
@@ -240,10 +271,14 @@ export function VideoEditorPage({ video, onReset }: VideoEditorPageProps) {
   const clipAreaRef = useRef<HTMLDivElement>(null);
   const dragStartRef = useRef({ x: 0, y: 0, translateX: 0, translateY: 0, cropX: 0, cropY: 0, cropW: 0, cropH: 0 });
 
-  // ── useVideoTransform Hook ──
+  // ── 統一的影片尺寸來源：優先使用瀏覽器 intrinsic，fallback 到 backend ──
+  const effectiveVideoW = intrinsicVideoSize?.w ?? videoInfo?.width ?? 1;
+  const effectiveVideoH = intrinsicVideoSize?.h ?? videoInfo?.height ?? 1;
+
+  // ── useVideoTransform Hook (使用統一尺寸) ──
   const transform = useVideoTransform({
-    videoWidth: videoInfo?.width ?? 1,
-    videoHeight: videoInfo?.height ?? 1,
+    videoWidth: effectiveVideoW,
+    videoHeight: effectiveVideoH,
     containerWidth: cropContainerSize.width,
     containerHeight: cropContainerSize.height,
   });
@@ -284,6 +319,20 @@ export function VideoEditorPage({ video, onReset }: VideoEditorPageProps) {
     return () => { cancelled = true; };
   }, [video.file]);
 
+  // ── 追蹤預覽區域尺寸 (ResizeObserver) ──
+  useEffect(() => {
+    const el = clipAreaRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver((entries) => {
+      const entry = entries[0];
+      if (entry) {
+        setPreviewAreaSize({ width: entry.contentRect.width, height: entry.contentRect.height });
+      }
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
   // ── 播放區間限制 (clip 模式)：到達 endT 時回到 startT ──
   useEffect(() => {
     const el = videoRef.current;
@@ -300,6 +349,34 @@ export function VideoEditorPage({ video, onReset }: VideoEditorPageProps) {
     el.addEventListener("timeupdate", handleTimeUpdate);
     return () => el.removeEventListener("timeupdate", handleTimeUpdate);
   }, [mode, startT, endT]);
+
+  // ── 播放區間限制 (default 模式含 exportConfig)：到達 end_t 時回到 start_t ──
+  useEffect(() => {
+    const el = videoRef.current;
+    if (!el || mode !== "default" || !exportConfig) return;
+
+    // 初始 seek 到起點
+    if (el.currentTime < exportConfig.start_t || el.currentTime >= exportConfig.end_t) {
+      el.currentTime = exportConfig.start_t;
+    }
+
+    const handleTimeUpdate = () => {
+      if (el.currentTime >= exportConfig.end_t || el.currentTime < exportConfig.start_t) {
+        el.currentTime = exportConfig.start_t;
+      }
+    };
+    const handleEnded = () => {
+      el.currentTime = exportConfig.start_t;
+      el.play();
+    };
+
+    el.addEventListener("timeupdate", handleTimeUpdate);
+    el.addEventListener("ended", handleEnded);
+    return () => {
+      el.removeEventListener("timeupdate", handleTimeUpdate);
+      el.removeEventListener("ended", handleEnded);
+    };
+  }, [mode, exportConfig]);
 
   // ── 監聽播放/暫停事件同步狀態 ──
   useEffect(() => {
@@ -370,6 +447,25 @@ export function VideoEditorPage({ video, onReset }: VideoEditorPageProps) {
 
   const isRotated90 = baseRotate % 180 !== 0;
 
+  // ── 裁切預覽容器尺寸 (fit within preview area) ──
+  const cropPreviewDims = useMemo(() => {
+    if (!exportConfig) return null;
+    const cropAR = exportConfig.crop_w / exportConfig.crop_h;
+    const pad = 0.92;
+    // 旋轉 90° 時視覺上寬高互換，需以互換後的空間來 fit
+    const aW = (isRotated90 ? previewAreaSize.height : previewAreaSize.width) * pad;
+    const aH = (isRotated90 ? previewAreaSize.width : previewAreaSize.height) * pad;
+    let w: number, h: number;
+    if (cropAR >= aW / aH) {
+      w = aW;
+      h = w / cropAR;
+    } else {
+      h = aH;
+      w = h * cropAR;
+    }
+    return { width: Math.round(w), height: Math.round(h) };
+  }, [exportConfig, previewAreaSize, isRotated90]);
+
   // ─────────────────────────────────────────────
   // 剪輯模式 — 統一的時間 + 空間操作
   // ─────────────────────────────────────────────
@@ -380,20 +476,26 @@ export function VideoEditorPage({ video, onReset }: VideoEditorPageProps) {
     const el = clipAreaRef.current;
     if (!el) return;
 
+    // 擷取瀏覽器實際解碼的影片解析度 (在模式切換前，video 元素仍掛載)
+    const vid = videoRef.current;
+    const vW = (vid && vid.videoWidth > 0) ? vid.videoWidth : videoInfo.width;
+    const vH = (vid && vid.videoHeight > 0) ? vid.videoHeight : videoInfo.height;
+    setIntrinsicVideoSize({ w: vW, h: vH });
+
     // 測量可用空間（扣除底部時間軸約 100px）
+    // 使用 intrinsic 尺寸計算，確保與 hook 的 displayMultiplier 一致
     const rect = el.getBoundingClientRect();
     const availW = rect.width;
     const availH = rect.height - 100;
 
-    const M = Math.min(availW / videoInfo.width, availH / videoInfo.height);
-    const cW = Math.round(videoInfo.width * M);
-    const cH = Math.round(videoInfo.height * M);
+    const M = Math.min(availW / vW, availH / vH);
+    const cW = Math.round(vW * M);
+    const cH = Math.round(vH * M);
 
     setCropContainerSize({ width: cW, height: cH });
     setMode("clip");
 
     // 從 startT 開始播放
-    const vid = videoRef.current;
     if (vid) {
       vid.loop = false;
       vid.currentTime = startT;
@@ -419,14 +521,24 @@ export function VideoEditorPage({ video, onReset }: VideoEditorPageProps) {
   const handleConfirmClip = useCallback(() => {
     if (!videoInfo) return;
 
+    const vid = videoRef.current;
+
+    // effectiveVideoW/H 已統一為 intrinsicVideoSize ?? videoInfo，
+    // hook 的 M、CSS 尺寸、此處座標轉換全部使用同一來源
     const area = getFinalVideoCropArea(
       transform.state,
       transform.displayMultiplier,
       cropContainerSize.width,
       cropContainerSize.height,
-      videoInfo.width,
-      videoInfo.height,
+      effectiveVideoW,
+      effectiveVideoH,
     );
+
+    console.log("[Clip Debug] effectiveVideo:", effectiveVideoW, "x", effectiveVideoH);
+    console.log("[Clip Debug] displayMultiplier:", transform.displayMultiplier);
+    console.log("[Clip Debug] container:", cropContainerSize.width, "x", cropContainerSize.height);
+    console.log("[Clip Debug] transform state:", JSON.stringify(transform.state));
+    console.log("[Clip Debug] area result:", JSON.stringify(area));
 
     const config: ClipExportConfig = {
       start_t: Math.round(startT * 100) / 100,
@@ -439,20 +551,20 @@ export function VideoEditorPage({ video, onReset }: VideoEditorPageProps) {
     };
 
     setExportConfig(config);
-    console.log("剪輯配置:", config);
+    console.log("[Clip Debug] 剪輯配置:", config);
 
     setMode("default");
-    const vid = videoRef.current;
     if (vid) {
       vid.loop = true;
       vid.play();
     }
-  }, [videoInfo, transform.state, transform.displayMultiplier, cropContainerSize, startT, endT, includeAudio]);
+  }, [videoInfo, transform.state, transform.displayMultiplier, cropContainerSize, startT, endT, includeAudio, effectiveVideoW, effectiveVideoH]);
 
   // ── 取消剪輯 ──
   const handleCancelClip = useCallback(() => {
     setStartT(0);
     setEndT(duration);
+    setExportConfig(null);
     setMode("default");
     const vid = videoRef.current;
     if (vid) {
@@ -895,14 +1007,14 @@ export function VideoEditorPage({ video, onReset }: VideoEditorPageProps) {
                 />
               </div>
 
-              {/* 裁切尺寸資訊 */}
+              {/* 裁切尺寸資訊 — effectiveVideoW/H 與 hook M 同源，直接除以 pixelScale */}
               {videoInfo && (
                 <div className="text-xs text-white/70 font-mono space-y-1 p-2">
                   <div>
-                    裁切: {Math.round(cropW / transform.displayMultiplier / transform.state.scale)} x{" "}
-                    {Math.round(cropH / transform.displayMultiplier / transform.state.scale)} px
+                    裁切: {Math.round(cropW / (transform.displayMultiplier * transform.state.scale))} x{" "}
+                    {Math.round(cropH / (transform.displayMultiplier * transform.state.scale))} px
                   </div>
-                  <div>原始: {videoInfo.width} x {videoInfo.height}</div>
+                  <div>原始: {effectiveVideoW} x {effectiveVideoH}</div>
                 </div>
               )}
             </div>
@@ -964,8 +1076,8 @@ export function VideoEditorPage({ video, onReset }: VideoEditorPageProps) {
                       src={videoUrlRef.current}
                       className="max-w-none pointer-events-none"
                       style={{
-                        width: videoInfo.width * transform.displayMultiplier,
-                        height: videoInfo.height * transform.displayMultiplier,
+                        width: effectiveVideoW * transform.displayMultiplier,
+                        height: effectiveVideoH * transform.displayMultiplier,
                         transform: transform.videoTransform,
                         transformOrigin: "center center",
                         transition: isSnappingBack ? "transform 200ms ease-out" : "none",
@@ -1134,12 +1246,40 @@ export function VideoEditorPage({ video, onReset }: VideoEditorPageProps) {
                 </div>
               )}
             </>
+          ) : exportConfig && videoInfo && cropPreviewDims ? (
+            /* ── 裁切預覽播放器 ── */
+            <div
+              className="relative overflow-hidden"
+              style={{
+                width: cropPreviewDims.width,
+                height: cropPreviewDims.height,
+                transform: defaultVideoTransform,
+                transition: "transform 0.4s cubic-bezier(0.4, 0, 0.2, 1)",
+              }}
+            >
+              <video
+                ref={videoRef}
+                src={videoUrlRef.current}
+                className="absolute pointer-events-none max-w-none max-h-none"
+                style={{
+                  // crop 座標在 effectiveVideo 像素空間，百分比需匹配
+                  // max-w-none: 覆寫 Tailwind preflight 的 max-width:100%
+                  width: `${(effectiveVideoW / exportConfig.crop_w) * 100}%`,
+                  height: `${(effectiveVideoH / exportConfig.crop_h) * 100}%`,
+                  left: `${(-exportConfig.crop_x / exportConfig.crop_w) * 100}%`,
+                  top: `${(-exportConfig.crop_y / exportConfig.crop_h) * 100}%`,
+                }}
+                muted
+                autoPlay
+                playsInline
+              />
+            </div>
           ) : (
             /* ── 一般影片播放器 ── */
             <video
               ref={videoRef}
               src={videoUrlRef.current}
-              className={isRotated90 ? "max-w-full max-h-full" : "max-w-full max-h-full"}
+              className="max-w-full max-h-full"
               style={{
                 transform: defaultVideoTransform,
                 transition: "transform 0.4s cubic-bezier(0.4, 0, 0.2, 1)",
