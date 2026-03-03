@@ -15,7 +15,6 @@ interface VideoExportPageProps {
   video: VideoItem;
   exportState: VideoExportState;
   onReturn: () => void;
-  onReset: () => void;
 }
 
 /** 秒數格式化為 mm:ss */
@@ -35,7 +34,6 @@ export function VideoExportPage({
   video,
   exportState,
   onReturn,
-  onReset,
 }: VideoExportPageProps) {
   const { clipConfig, rotate, flipH, flipV } = exportState;
 
@@ -567,36 +565,26 @@ export function VideoExportPage({
 
         {/* 底部按鈕 */}
         <div className="p-4 pt-0 flex flex-col gap-2">
-          {outputInfo ? (
-            <button
-              onClick={handleDownload}
-              disabled={downloading}
-              className="w-full px-4 py-3 bg-[#00B4FF] text-white font-bold rounded-[10px] transition-all btn-vic disabled:opacity-40"
-            >
-              {downloading ? "下載中..." : "下載影片"}
-            </button>
-          ) : (
-            <button
-              onClick={handleExport}
-              disabled={exporting || !videoInfo}
-              className="w-full px-4 py-3 bg-[#00B4FF] text-white font-bold rounded-[10px] transition-all btn-vic disabled:opacity-40"
-            >
-              {exporting ? "匯出中..." : "開始匯出"}
-            </button>
-          )}
+          <button
+            onClick={handleExport}
+            disabled={exporting || !videoInfo}
+            className="w-full px-4 py-3 bg-[#00B4FF] text-white font-bold rounded-[10px] transition-all btn-vic disabled:opacity-40"
+          >
+            {exporting ? "匯出中..." : "開始匯出"}
+          </button>
+          <button
+            onClick={handleDownload}
+            disabled={!outputInfo || downloading}
+            className="w-full px-4 py-3 bg-white/10 text-white font-bold rounded-[10px] transition-all disabled:opacity-30"
+          >
+            {downloading ? "下載中..." : "下載影片"}
+          </button>
           <button
             onClick={onReturn}
             disabled={exporting}
             className="w-full px-4 py-2 text-white/70 hover:text-white text-md transition-colors disabled:opacity-40"
           >
             返回裁切
-          </button>
-          <button
-            onClick={onReset}
-            disabled={exporting}
-            className="w-full px-4 py-2 text-white/50 hover:text-white text-sm transition-colors disabled:opacity-40"
-          >
-            返回首頁
           </button>
         </div>
       </aside>

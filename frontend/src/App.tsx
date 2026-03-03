@@ -147,7 +147,6 @@ function App() {
           video={video}
           exportState={videoExportState}
           onReturn={handleVideoReturnToEdit}
-          onReset={handleReset}
         />
       );
     }
