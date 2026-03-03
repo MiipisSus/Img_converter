@@ -183,6 +183,16 @@ export function useVideoTransform(options: UseVideoTransformOptions) {
     })
   }, [])
 
+  // ── restoreState — 一次性設定完整狀態 + 自動 clamp ──
+  const restoreState = useCallback((newState: VideoTransformState) => {
+    setState(() => {
+      const { videoWidth: vw, videoHeight: vh, containerWidth: cW, containerHeight: cH } = optsRef.current
+      const M = Math.min(cW / vw, cH / vh)
+      const clamped = clampTranslate(newState, vw, vh, M, cW, cH)
+      return clamped ? { ...newState, ...clamped } : newState
+    })
+  }, [])
+
   // ── CSS transform ──
   const videoTransform = useMemo(() => {
     const { translateX: tx, translateY: ty, scale: s } = state
@@ -199,5 +209,6 @@ export function useVideoTransform(options: UseVideoTransformOptions) {
     resizeCropBox,
     setCropBox,
     reset,
+    restoreState,
   }
 }

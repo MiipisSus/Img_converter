@@ -33,6 +33,59 @@ export interface ClipExportConfig {
 }
 
 // ─────────────────────────────────────────────
+// SavedClipState — 剪輯狀態持久化
+// ─────────────────────────────────────────────
+
+interface SavedClipState {
+  scale: number;             // 縮放等級 (1-5)
+  cropRatio: string | null;  // "16:9" 等預設比例，null = 自由裁切
+}
+
+// ─────────────────────────────────────────────
+// reconstructTransformFromCrop — 從原始像素座標反推 UI transform state
+// ─────────────────────────────────────────────
+// 用於重新進入剪輯模式時，根據新的容器尺寸重建裁切框
+// 裁切框居中於容器，translate 反推確保影片與裁切區域對齊
+
+function reconstructTransformFromCrop(
+  crop: { x: number; y: number; width: number; height: number },
+  savedScale: number,
+  videoW: number,
+  videoH: number,
+  containerW: number,
+  containerH: number,
+): VideoTransformState {
+  const M = Math.min(containerW / videoW, containerH / videoH);
+  const scale = savedScale;
+
+  // 裁切框 UI 尺寸 = 原始像素 × M × scale
+  let cropW = crop.width * M * scale;
+  let cropH = crop.height * M * scale;
+
+  // 確保裁切框不超出容器
+  cropW = Math.min(cropW, containerW);
+  cropH = Math.min(cropH, containerH);
+
+  // 裁切框居中於容器
+  const cropX = (containerW - cropW) / 2;
+  const cropY = (containerH - cropH) / 2;
+
+  // 反推 translate：讓裁切區域中心對齊裁切框中心
+  // UI_x = (cW - vW*M*s)/2 + tx + px*M*s
+  // 令 px = crop.x + crop.width/2，UI_x = cropX + cropW/2
+  const tx =
+    cropX + cropW / 2 -
+    (containerW - videoW * M * scale) / 2 -
+    (crop.x + crop.width / 2) * M * scale;
+  const ty =
+    cropY + cropH / 2 -
+    (containerH - videoH * M * scale) / 2 -
+    (crop.y + crop.height / 2) * M * scale;
+
+  return { scale, translateX: tx, translateY: ty, cropX, cropY, cropW, cropH };
+}
+
+// ─────────────────────────────────────────────
 // getFinalVideoCropArea — UI 座標→原始像素座標 (含偶數修正)
 // ─────────────────────────────────────────────
 //
@@ -258,6 +311,10 @@ export function VideoEditorPage({ video, onReset }: VideoEditorPageProps) {
   // ── 已套用的剪輯配置 ──
   const [exportConfig, setExportConfig] = useState<ClipExportConfig | null>(null);
 
+  // ── 剪輯狀態持久化 (重新進入時恢復) ──
+  const [savedClipState, setSavedClipState] = useState<SavedClipState | null>(null);
+  const [selectedCropRatio, setSelectedCropRatio] = useState<string | null>(null);
+
   // ── 預覽區域尺寸 (用於裁切預覽計算) ──
   const [previewAreaSize, setPreviewAreaSize] = useState({ width: 800, height: 600 });
 
@@ -307,7 +364,13 @@ export function VideoEditorPage({ video, onReset }: VideoEditorPageProps) {
         if (cancelled) return;
         setVideoInfo(info);
         setEndT(info.duration);
+        setStartT(0);
         setIncludeAudio(info.has_audio);
+        // 新影片：重置所有剪輯狀態
+        setSavedClipState(null);
+        setSelectedCropRatio(null);
+        setExportConfig(null);
+        setIntrinsicVideoSize(null);
       })
       .catch((err) => {
         if (cancelled) return;
@@ -503,11 +566,29 @@ export function VideoEditorPage({ video, onReset }: VideoEditorPageProps) {
     }
   }, [videoInfo, startT]);
 
-  // 進入 clip 模式後重置 transform 並開始播放
+  // 進入 clip 模式後：恢復已儲存的狀態 或 完整重置
   const prevModeRef = useRef<EditorMode>("default");
   useEffect(() => {
     if (mode === "clip" && prevModeRef.current !== "clip") {
-      transform.reset();
+      if (savedClipState && exportConfig) {
+        // 從已確認的配置恢復 — 重新計算 UI 座標以適應可能改變的容器尺寸
+        const restored = reconstructTransformFromCrop(
+          { x: exportConfig.crop_x, y: exportConfig.crop_y,
+            width: exportConfig.crop_w, height: exportConfig.crop_h },
+          savedClipState.scale,
+          effectiveVideoW,
+          effectiveVideoH,
+          cropContainerSize.width,
+          cropContainerSize.height,
+        );
+        transform.restoreState(restored);
+        setSelectedCropRatio(savedClipState.cropRatio);
+        console.log("[Clip Restore] 從儲存狀態恢復:", JSON.stringify(restored));
+      } else {
+        // 首次進入，完整重置
+        transform.reset();
+        setSelectedCropRatio(null);
+      }
       // 在下一幀開始播放 (確保 video ref 已掛載)
       requestAnimationFrame(() => {
         const vid = videoRef.current;
@@ -515,7 +596,7 @@ export function VideoEditorPage({ video, onReset }: VideoEditorPageProps) {
       });
     }
     prevModeRef.current = mode;
-  }, [mode, transform.reset]);
+  }, [mode, savedClipState, exportConfig, effectiveVideoW, effectiveVideoH, cropContainerSize, transform]);
 
   // ── 套用剪輯 — 同時輸出時間 + 空間參數 ──
   const handleConfirmClip = useCallback(() => {
@@ -551,6 +632,13 @@ export function VideoEditorPage({ video, onReset }: VideoEditorPageProps) {
     };
 
     setExportConfig(config);
+
+    // 持久化剪輯狀態 — 重新進入時可恢復
+    setSavedClipState({
+      scale: transform.state.scale,
+      cropRatio: selectedCropRatio,
+    });
+
     console.log("[Clip Debug] 剪輯配置:", config);
 
     setMode("default");
@@ -558,21 +646,19 @@ export function VideoEditorPage({ video, onReset }: VideoEditorPageProps) {
       vid.loop = true;
       vid.play();
     }
-  }, [videoInfo, transform.state, transform.displayMultiplier, cropContainerSize, startT, endT, includeAudio, effectiveVideoW, effectiveVideoH]);
+  }, [videoInfo, transform.state, transform.displayMultiplier, cropContainerSize, startT, endT, includeAudio, effectiveVideoW, effectiveVideoH, selectedCropRatio]);
 
-  // ── 取消剪輯 ──
+  // ── 取消剪輯 — 僅退出模式，保留已儲存的設定 ──
   const handleCancelClip = useCallback(() => {
-    setStartT(0);
-    setEndT(duration);
-    setExportConfig(null);
     setMode("default");
     const vid = videoRef.current;
     if (vid) {
       vid.loop = true;
-      vid.currentTime = 0;
+      // 有已套用配置：從起始時間播放；否則從頭播放
+      vid.currentTime = exportConfig?.start_t ?? 0;
       vid.play();
     }
-  }, [duration]);
+  }, [exportConfig]);
 
   // ── 播放/暫停切換 ──
   const handlePlayPause = useCallback(() => {
@@ -720,6 +806,8 @@ export function VideoEditorPage({ video, onReset }: VideoEditorPageProps) {
   // ── 裁切比例預設 ──
   const handleSetCropRatio = useCallback(
     (ratioW: number, ratioH: number) => {
+      setSelectedCropRatio(`${ratioW}:${ratioH}`);
+
       const cW = cropContainerSize.width;
       const cH = cropContainerSize.height;
       const ratio = ratioW / ratioH;
@@ -972,8 +1060,11 @@ export function VideoEditorPage({ video, onReset }: VideoEditorPageProps) {
                     <button
                       key={label}
                       onClick={() => handleSetCropRatio(w, h)}
-                      className="flex flex-col items-center justify-center gap-1.5 rounded-lg border border-white/10 bg-white/5 transition-all
-                        hover:bg-[#00B4FF]/15 hover:border-[#00B4FF]/60 active:scale-95"
+                      className={`flex flex-col items-center justify-center gap-1.5 rounded-lg border transition-all active:scale-95
+                        ${selectedCropRatio === label
+                          ? "border-[#00B4FF] bg-[#00B4FF]/20"
+                          : "border-white/10 bg-white/5 hover:bg-[#00B4FF]/15 hover:border-[#00B4FF]/60"
+                        }`}
                       style={{ aspectRatio: "1 / 1" }}
                     >
                       <div
