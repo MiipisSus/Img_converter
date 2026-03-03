@@ -168,6 +168,8 @@ interface TrimSliderProps {
   onStartChange: (v: number) => void;
   onEndChange: (v: number) => void;
   onSeek: (v: number) => void;
+  onDragStart?: () => void;
+  onDragEnd?: (target: "start" | "end" | "seek") => void;
 }
 
 function TrimSlider({
@@ -179,6 +181,8 @@ function TrimSlider({
   onStartChange,
   onEndChange,
   onSeek,
+  onDragStart,
+  onDragEnd,
 }: TrimSliderProps) {
   const trackRef = useRef<HTMLDivElement>(null);
   const draggingRef = useRef<"start" | "end" | "seek" | null>(null);
@@ -199,8 +203,9 @@ function TrimSlider({
     (target: "start" | "end") => (e: React.MouseEvent) => {
       e.preventDefault();
       draggingRef.current = target;
+      onDragStart?.();
     },
-    [],
+    [onDragStart],
   );
 
   const handleTrackMouseDown = useCallback(
@@ -210,8 +215,9 @@ function TrimSlider({
       const pos = posFromEvent(e);
       onSeek(Math.max(startT, Math.min(endT, pos)));
       draggingRef.current = "seek";
+      onDragStart?.();
     },
-    [posFromEvent, onSeek, startT, endT],
+    [posFromEvent, onSeek, startT, endT, onDragStart],
   );
 
   useEffect(() => {
@@ -229,7 +235,9 @@ function TrimSlider({
     };
 
     const handleMouseUp = () => {
+      const d = draggingRef.current;
       draggingRef.current = null;
+      if (d) onDragEnd?.(d);
     };
 
     window.addEventListener("mousemove", handleMouseMove);
@@ -238,7 +246,7 @@ function TrimSlider({
       window.removeEventListener("mousemove", handleMouseMove);
       window.removeEventListener("mouseup", handleMouseUp);
     };
-  }, [duration, startT, endT, posFromEvent, onStartChange, onEndChange, onSeek]);
+  }, [duration, startT, endT, posFromEvent, onStartChange, onEndChange, onSeek, onDragEnd]);
 
   const startPct = toPercent(startT);
   const endPct = toPercent(endT);
@@ -323,6 +331,12 @@ export function VideoEditorPage({ video, onReset }: VideoEditorPageProps) {
   const [endT, setEndT] = useState(0);
   const [currentTime, setCurrentTime] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
+
+  // ── Trim ref (同步更新，避免 timeupdate 閉包讀到舊值) ──
+  const trimRef = useRef({ startT: 0, endT: 0 });
+  trimRef.current.startT = startT;
+  trimRef.current.endT = endT;
+  const isTrimDraggingRef = useRef(false);
 
   // ── 音訊開關 ──
   const [includeAudio, setIncludeAudio] = useState(true);
@@ -451,21 +465,23 @@ export function VideoEditorPage({ video, onReset }: VideoEditorPageProps) {
   }, []);
 
   // ── 播放區間限制 (clip 模式)：到達 endT 時回到 startT ──
+  // 使用 trimRef 避免閉包捕獲舊值；拖曳中暫停循環邏輯
   useEffect(() => {
     const el = videoRef.current;
     if (!el || mode !== "clip") return;
 
     const handleTimeUpdate = () => {
       setCurrentTime(el.currentTime);
-      if (el.currentTime >= endT) {
-        el.currentTime = startT;
-        setCurrentTime(startT);
+      if (isTrimDraggingRef.current) return;
+      if (el.currentTime >= trimRef.current.endT) {
+        el.currentTime = trimRef.current.startT;
+        setCurrentTime(trimRef.current.startT);
       }
     };
 
     el.addEventListener("timeupdate", handleTimeUpdate);
     return () => el.removeEventListener("timeupdate", handleTimeUpdate);
-  }, [mode, startT, endT]);
+  }, [mode]);
 
   // ── 播放區間限制 (default 模式含 exportConfig)：到達 end_t 時回到 start_t ──
   useEffect(() => {
@@ -738,6 +754,7 @@ export function VideoEditorPage({ video, onReset }: VideoEditorPageProps) {
       setStartT(v);
       const el = videoRef.current;
       if (el) {
+        if (!el.paused) el.pause();
         el.currentTime = v;
         setCurrentTime(v);
       }
@@ -748,9 +765,9 @@ export function VideoEditorPage({ video, onReset }: VideoEditorPageProps) {
   const handleEndChange = useCallback(
     (v: number) => {
       setEndT(v);
-      // 拖曳結束點時同步 seek，讓使用者看到該時間點的畫面
       const el = videoRef.current;
       if (el) {
+        if (!el.paused) el.pause();
         el.currentTime = v;
         setCurrentTime(v);
       }
@@ -763,6 +780,29 @@ export function VideoEditorPage({ video, onReset }: VideoEditorPageProps) {
     if (el) {
       el.currentTime = v;
       setCurrentTime(v);
+    }
+  }, []);
+
+  // ── 滑桿拖曳開始/結束 ──
+  const wasPlayingBeforeDragRef = useRef(false);
+
+  const handleTrimDragStart = useCallback(() => {
+    isTrimDraggingRef.current = true;
+    const el = videoRef.current;
+    wasPlayingBeforeDragRef.current = !!el && !el.paused;
+  }, []);
+
+  const handleTrimDragEnd = useCallback((target: "start" | "end" | "seek") => {
+    isTrimDraggingRef.current = false;
+    const el = videoRef.current;
+    if (!el) return;
+    if (wasPlayingBeforeDragRef.current) {
+      // 放手後從 startT 開始循環播放
+      if (target === "start" || target === "end") {
+        el.currentTime = trimRef.current.startT;
+        setCurrentTime(trimRef.current.startT);
+      }
+      el.play();
     }
   }, []);
 
@@ -1367,6 +1407,8 @@ export function VideoEditorPage({ video, onReset }: VideoEditorPageProps) {
                     onStartChange={handleStartChange}
                     onEndChange={handleEndChange}
                     onSeek={handleSeek}
+                    onDragStart={handleTrimDragStart}
+                    onDragEnd={handleTrimDragEnd}
                   />
 
                   <div className="flex items-center justify-between">

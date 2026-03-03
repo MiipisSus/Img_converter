@@ -67,7 +67,6 @@ input[type="range"].slider-dark::-moz-range-thumb {
   position: relative;
   height: 48px;
   user-select: none;
-  border-radius: 6px;
   overflow: hidden;
   background: #1a1a1a;
 }
