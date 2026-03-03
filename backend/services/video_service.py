@@ -375,6 +375,7 @@ class VideoService:
             else:
                 result["estimated_video_bitrate_kbps"] = None
                 result["estimated_audio_bitrate_kbps"] = 128 if has_audio else 0
+                result["estimated_total_bitrate_kbps"] = None
                 result["warning"] = None
 
             return result

@@ -154,6 +154,10 @@ export function VideoEditorPage({ video, onReset }: VideoEditorPageProps) {
   const [currentTime, setCurrentTime] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
 
+  // ── 音訊開關 (預設跟隨影片是否有音軌)
+  const [includeAudio, setIncludeAudio] = useState(true);
+  const handleToggleAudio = useCallback(() => setIncludeAudio((prev) => !prev), []);
+
   // ── 預估結果 ──
   const [estimate, setEstimate] = useState<BitrateEstimateResult | null>(null);
   const [estimating, setEstimating] = useState(false);
@@ -187,6 +191,7 @@ export function VideoEditorPage({ video, onReset }: VideoEditorPageProps) {
         if (cancelled) return;
         setVideoInfo(info);
         setEndT(info.duration);
+        setIncludeAudio(info.has_audio);
       })
       .catch((err) => {
         if (cancelled) return;
@@ -231,7 +236,7 @@ export function VideoEditorPage({ video, onReset }: VideoEditorPageProps) {
     };
   }, []);
 
-  // ── 預估觸發 (debounce 800ms) ──
+  // ── 預估觸發 (debounce 800ms) — 裁剪時間或音訊開關變化時重新預估 ──
   useEffect(() => {
     if (mode !== "trim" || !videoInfo) return;
 
@@ -241,7 +246,7 @@ export function VideoEditorPage({ video, onReset }: VideoEditorPageProps) {
       setEstimating(true);
       try {
         const result = await estimateVideo(video.file, {
-          include_audio: videoInfo.has_audio,
+          include_audio: includeAudio,
         });
         setEstimate(result);
       } catch (err) {
@@ -254,7 +259,7 @@ export function VideoEditorPage({ video, onReset }: VideoEditorPageProps) {
     return () => {
       if (estimateTimerRef.current) clearTimeout(estimateTimerRef.current);
     };
-  }, [mode, trimDuration, video.file, videoInfo]);
+  }, [mode, trimDuration, includeAudio, video.file, videoInfo]);
 
   // ── 預估檔案大小 (根據裁剪比例) ──
   const estimatedSizeKB = useMemo(() => {
@@ -544,6 +549,28 @@ export function VideoEditorPage({ video, onReset }: VideoEditorPageProps) {
                     </span>
                   </div>
                 </div>
+              </div>
+
+              {/* 音訊開關 */}
+              <div className="bg-white/10 rounded-[10px] p-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs text-white/70 font-medium">保留音軌</span>
+                  <button
+                    onClick={handleToggleAudio}
+                    className={`relative w-10 h-[22px] rounded-full transition-colors duration-200 ${
+                      includeAudio ? "bg-[#00B4FF]" : "bg-white/20"
+                    }`}
+                  >
+                    <span
+                      className={`absolute top-[3px] left-[3px] w-4 h-4 rounded-full bg-white shadow transition-transform duration-200 ${
+                        includeAudio ? "translate-x-[18px]" : "translate-x-0"
+                      }`}
+                    />
+                  </button>
+                </div>
+                {!videoInfo?.has_audio && (
+                  <p className="text-[10px] text-white/30 mt-1">此影片無音軌</p>
+                )}
               </div>
             </div>
           )}
