@@ -1,5 +1,6 @@
 import { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import type { VideoItem } from "../types";
+import type { VideoExportState } from "../App";
 import { getVideoInfo, estimateVideo } from "../api/videoApi";
 import type { VideoInfoResult, BitrateEstimateResult } from "../api/videoApi";
 import { useVideoTransform } from "../hooks/useVideoTransform";
@@ -9,8 +10,9 @@ import vicLogo from "../assets/vic_logo.png";
 
 interface VideoEditorPageProps {
   video: VideoItem;
-  onExport: (state: { clipConfig: ClipExportConfig | null; rotate: number; flipH: boolean; flipV: boolean }) => void;
+  onExport: (state: VideoExportState) => void;
   onReset: () => void;
+  initialState?: VideoExportState | null;
 }
 
 /** 秒數格式化為 mm:ss.x */
@@ -312,7 +314,7 @@ function TrimSlider({
 type EditorMode = "default" | "clip";
 type CropResizeHandle = "nw" | "ne" | "sw" | "se" | "n" | "s" | "e" | "w";
 
-export function VideoEditorPage({ video, onExport, onReset }: VideoEditorPageProps) {
+export function VideoEditorPage({ video, onExport, onReset, initialState }: VideoEditorPageProps) {
   // ── 影片資訊 ──
   const [videoInfo, setVideoInfo] = useState<VideoInfoResult | null>(null);
   const [loading, setLoading] = useState(true);
@@ -321,15 +323,15 @@ export function VideoEditorPage({ video, onExport, onReset }: VideoEditorPagePro
   const [mode, setMode] = useState<EditorMode>("default");
 
   // ── 旋轉/翻轉 ──
-  const [baseRotate, setBaseRotate] = useState(0);
-  const visualRotateRef = useRef(0);
-  const [visualRotate, setVisualRotate] = useState(0);
-  const [flipX, setFlipX] = useState(false);
-  const [flipY, setFlipY] = useState(false);
+  const [baseRotate, setBaseRotate] = useState(initialState?.rotate ?? 0);
+  const visualRotateRef = useRef(initialState?.rotate ?? 0);
+  const [visualRotate, setVisualRotate] = useState(initialState?.rotate ?? 0);
+  const [flipX, setFlipX] = useState(initialState?.flipH ?? false);
+  const [flipY, setFlipY] = useState(initialState?.flipV ?? false);
 
   // ── 時間裁剪參數 ──
-  const [startT, setStartT] = useState(0);
-  const [endT, setEndT] = useState(0);
+  const [startT, setStartT] = useState(initialState?.clipConfig?.start_t ?? 0);
+  const [endT, setEndT] = useState(initialState?.clipConfig?.end_t ?? 0);
   const [currentTime, setCurrentTime] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
 
@@ -340,7 +342,7 @@ export function VideoEditorPage({ video, onExport, onReset }: VideoEditorPagePro
   const isTrimDraggingRef = useRef(false);
 
   // ── 音訊開關 ──
-  const [includeAudio, setIncludeAudio] = useState(true);
+  const [includeAudio, setIncludeAudio] = useState(initialState?.clipConfig?.include_audio ?? true);
   const handleToggleAudio = useCallback(() => setIncludeAudio((prev) => !prev), []);
 
   // ── 預估結果 ──
@@ -355,11 +357,11 @@ export function VideoEditorPage({ video, onExport, onReset }: VideoEditorPagePro
   const [isSnappingBack, setIsSnappingBack] = useState(false);
 
   // ── 已套用的剪輯配置 ──
-  const [exportConfig, setExportConfig] = useState<ClipExportConfig | null>(null);
+  const [exportConfig, setExportConfig] = useState<ClipExportConfig | null>(initialState?.clipConfig ?? null);
 
   // ── 剪輯狀態持久化 (重新進入時恢復) ──
-  const [savedClipState, setSavedClipState] = useState<SavedClipState | null>(null);
-  const [selectedCropRatio, setSelectedCropRatio] = useState<string | null>(null);
+  const [savedClipState, setSavedClipState] = useState<SavedClipState | null>(initialState?.savedClipState ?? null);
+  const [selectedCropRatio, setSelectedCropRatio] = useState<string | null>(initialState?.savedClipState?.cropRatio ?? null);
 
   // ── 膠捲縮圖 (Filmstrip) ──
   const [filmstrip, setFilmstrip] = useState<string[]>([]);
@@ -413,14 +415,21 @@ export function VideoEditorPage({ video, onExport, onReset }: VideoEditorPagePro
       .then((info) => {
         if (cancelled) return;
         setVideoInfo(info);
-        setEndT(info.duration);
-        setStartT(0);
-        setIncludeAudio(info.has_audio);
-        // 新影片：重置所有剪輯狀態
-        setSavedClipState(null);
-        setSelectedCropRatio(null);
-        setExportConfig(null);
-        setIntrinsicVideoSize(null);
+        if (initialState?.clipConfig) {
+          // 從匯出頁返回：保留已有的剪輯狀態
+          setStartT(initialState.clipConfig.start_t);
+          setEndT(initialState.clipConfig.end_t);
+          setIncludeAudio(initialState.clipConfig.include_audio);
+        } else {
+          // 新影片：重置所有剪輯狀態
+          setEndT(info.duration);
+          setStartT(0);
+          setIncludeAudio(info.has_audio);
+          setSavedClipState(null);
+          setSelectedCropRatio(null);
+          setExportConfig(null);
+          setIntrinsicVideoSize(null);
+        }
       })
       .catch((err) => {
         if (cancelled) return;
@@ -1236,6 +1245,7 @@ export function VideoEditorPage({ video, onExport, onReset }: VideoEditorPagePro
                 rotate: baseRotate,
                 flipH: flipX,
                 flipV: flipY,
+                savedClipState,
               })}
               className="w-full px-4 py-3 bg-[#00B4FF] text-white font-bold rounded-[10px] transition-all btn-vic"
             >

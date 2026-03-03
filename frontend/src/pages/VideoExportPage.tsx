@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useEffect } from "react";
+import { useState, useCallback, useRef, useEffect, useLayoutEffect, useMemo } from "react";
 import type { VideoItem } from "../types";
 import type { VideoExportState } from "../App";
 import {
@@ -39,9 +39,15 @@ export function VideoExportPage({
 }: VideoExportPageProps) {
   const { clipConfig, rotate, flipH, flipV } = exportState;
 
-  // ── 影片資訊 ──
+  // ── 影片資訊 (API，用於 sidebar 顯示) ──
   const [videoInfo, setVideoInfo] = useState<VideoInfoResult | null>(null);
   const [loading, setLoading] = useState(true);
+
+  // ── 影片原生尺寸 (onLoadedMetadata，用於預覽計算) ──
+  const [nativeSize, setNativeSize] = useState<{ w: number; h: number } | null>(null);
+
+  // ── 影片 URL ──
+  const [videoUrl, setVideoUrl] = useState("");
 
   // ── 目標大小 ──
   const [targetInput, setTargetInput] = useState("");
@@ -57,7 +63,11 @@ export function VideoExportPage({
   const [downloading, setDownloading] = useState(false);
 
   const pollRef = useRef<ReturnType<typeof setInterval>>(undefined);
-  const videoUrlRef = useRef("");
+  const videoRef = useRef<HTMLVideoElement>(null);
+
+  // ── 預覽區域尺寸測量 ──
+  const previewRef = useRef<HTMLDivElement>(null);
+  const [previewSize, setPreviewSize] = useState({ w: 0, h: 0 });
 
   // ── 衍生資料 ──
   const trimDuration =
@@ -103,7 +113,47 @@ export function VideoExportPage({
     high: "#34C759",
   };
 
-  // ── 載入影片資訊 ──
+  // ── 旋轉判定 ──
+  const isRotated90 = rotate === 90 || rotate === 270;
+
+  // ── 計算裁切容器尺寸 (依賴 nativeSize，確保 onLoadedMetadata 後才計算) ──
+  const cropContainerSize = useMemo(() => {
+    if (!clipConfig || previewSize.w === 0 || !nativeSize) return null;
+
+    const cw = clipConfig.crop_w;
+    const ch = clipConfig.crop_h;
+
+    // CSS rotate 後視覺維度互換
+    const visualW = isRotated90 ? ch : cw;
+    const visualH = isRotated90 ? cw : ch;
+    const visualAspect = visualW / visualH;
+
+    // 預覽區域留 margin
+    const areaW = previewSize.w - 32;
+    const areaH = previewSize.h - 32;
+    const areaAspect = areaW / areaH;
+
+    // 將旋轉後的視覺尺寸 fit 進預覽區域
+    let fitW: number, fitH: number;
+    if (visualAspect > areaAspect) {
+      fitW = areaW;
+      fitH = areaW / visualAspect;
+    } else {
+      fitH = areaH;
+      fitW = areaH * visualAspect;
+    }
+
+    // 容器使用旋轉前的座標，CSS transform 負責旋轉
+    return {
+      w: isRotated90 ? fitH : fitW,
+      h: isRotated90 ? fitW : fitH,
+    };
+  }, [clipConfig, previewSize, isRotated90, nativeSize]);
+
+  // ── 是否啟用裁切預覽 ──
+  const hasCrop = !!(clipConfig && nativeSize && cropContainerSize);
+
+  // ── 載入影片資訊 (API，用於 sidebar) ──
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
@@ -123,15 +173,68 @@ export function VideoExportPage({
   // ── ObjectURL ──
   useEffect(() => {
     const url = URL.createObjectURL(video.file);
-    videoUrlRef.current = url;
+    setVideoUrl(url);
     return () => URL.revokeObjectURL(url);
   }, [video.file]);
+
+  // ── 測量預覽區域 (previewRef 永遠在 DOM，deps 為 []) ──
+  useLayoutEffect(() => {
+    const el = previewRef.current;
+    if (!el) return;
+    const update = () => {
+      const { clientWidth: w, clientHeight: h } = el;
+      if (w > 0 && h > 0) setPreviewSize({ w, h });
+    };
+    update();
+    const ro = new ResizeObserver(() => update());
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
   // ── 清理 polling ──
   useEffect(() => {
     return () => {
       if (pollRef.current) clearInterval(pollRef.current);
     };
+  }, []);
+
+  // ── 影片 trim 循環播放 ──
+  useEffect(() => {
+    const vid = videoRef.current;
+    if (!vid) return;
+
+    if (!clipConfig) {
+      vid.loop = true;
+      return;
+    }
+
+    vid.loop = false;
+    vid.currentTime = clipConfig.start_t;
+
+    const handleTimeUpdate = () => {
+      if (vid.currentTime >= clipConfig.end_t || vid.currentTime < clipConfig.start_t) {
+        vid.currentTime = clipConfig.start_t;
+      }
+    };
+    const handleEnded = () => {
+      vid.currentTime = clipConfig.start_t;
+      vid.play();
+    };
+
+    vid.addEventListener("timeupdate", handleTimeUpdate);
+    vid.addEventListener("ended", handleEnded);
+    return () => {
+      vid.removeEventListener("timeupdate", handleTimeUpdate);
+      vid.removeEventListener("ended", handleEnded);
+    };
+  }, [clipConfig]);
+
+  // ── onLoadedMetadata：確認原生尺寸後才開始 CSS 變換 ──
+  const handleLoadedMetadata = useCallback(() => {
+    const vid = videoRef.current;
+    if (vid && vid.videoWidth > 0) {
+      setNativeSize({ w: vid.videoWidth, h: vid.videoHeight });
+    }
   }, []);
 
   // ── 目標大小 commit ──
@@ -243,15 +346,7 @@ export function VideoExportPage({
     .filter(Boolean)
     .join(" ");
 
-  // ── Loading ──
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-sidebar flex items-center justify-center">
-        <div className="animate-pulse text-white/50 text-lg">載入中...</div>
-      </div>
-    );
-  }
-
+  // ── 永遠渲染完整佈局 (不因 loading 而 early return) ──
   return (
     <div className="h-screen flex overflow-hidden bg-sidebar">
       {/* ===== 左側設定面板 ===== */}
@@ -263,168 +358,183 @@ export function VideoExportPage({
 
         {/* 設定區 */}
         <div className="flex-1 p-4 pt-2 flex flex-col gap-3">
-          {/* ── 影片資訊 ── */}
-          <section className="flex flex-col gap-2">
-            <h3 className="text-xs font-bold text-white/50 uppercase tracking-wider">
-              影片資訊
-            </h3>
-            <div className="bg-white/5 rounded-[10px] p-3 flex flex-col gap-1.5 text-sm font-mono">
-              <div className="flex justify-between">
-                <span className="text-white/50">檔案名稱</span>
-                <span className="text-white truncate max-w-[140px]">{video.name}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-white/50">原始大小</span>
-                <span className="text-white">{fmtSize(originalSizeKB)}</span>
-              </div>
-              {videoInfo && (
-                <>
-                  <div className="flex justify-between">
-                    <span className="text-white/50">原始解析度</span>
-                    <span className="text-white">
-                      {videoInfo.width} x {videoInfo.height}
-                    </span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-white/50">總時長</span>
-                    <span className="text-white">{fmtTime(videoInfo.duration)}</span>
-                  </div>
-                </>
-              )}
-            </div>
-          </section>
-
-          {/* ── 剪輯摘要 ── */}
-          <section className="flex flex-col gap-2">
-            <h3 className="text-xs font-bold text-white/50 uppercase tracking-wider">
-              剪輯摘要
-            </h3>
-            <div className="bg-white/5 rounded-[10px] p-3 flex flex-col gap-1.5 text-sm font-mono">
-              <div className="flex justify-between">
-                <span className="text-white/50">裁切後時長</span>
-                <span className="text-white">{fmtTime(trimDuration)}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-white/50">輸出尺寸</span>
-                <span className="text-white">{cropW} x {cropH}</span>
-              </div>
-              {rotate !== 0 && (
-                <div className="flex justify-between">
-                  <span className="text-white/50">旋轉</span>
-                  <span className="text-white">{rotate}°</span>
-                </div>
-              )}
-              {(flipH || flipV) && (
-                <div className="flex justify-between">
-                  <span className="text-white/50">翻轉</span>
-                  <span className="text-white">
-                    {[flipH && "水平", flipV && "垂直"].filter(Boolean).join(" + ")}
-                  </span>
-                </div>
-              )}
-              <div className="flex justify-between">
-                <span className="text-white/50">音訊</span>
-                <span className="text-white">
-                  {includeAudio ? "保留" : "移除"}
-                </span>
-              </div>
-            </div>
-          </section>
-
-          {/* ── 目標檔案大小 ── */}
-          <div className="bg-white/10 rounded-[10px] p-3">
-            <p className="text-xs text-white/70 font-medium mb-3">目標檔案大小</p>
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-white/70 shrink-0">目標</span>
-              <input
-                type="number"
-                min={1}
-                step={1}
-                placeholder="不限制"
-                value={targetInput}
-                onChange={(e) => setTargetInput(e.target.value)}
-                onBlur={commitTarget}
-                onKeyDown={handleTargetKeyDown}
-                disabled={exporting}
-                className="w-20 px-2 py-1 text-sm input-vic disabled:opacity-40"
+          {loading ? (
+            /* API 載入中 — sidebar 顯示 spinner */
+            <div className="flex-1 flex items-center justify-center">
+              <div
+                className="w-8 h-8 rounded-full animate-spin"
+                style={{
+                  border: "3px solid rgba(255,255,255,0.15)",
+                  borderTopColor: "#00B4FF",
+                }}
               />
-              <span className="text-xs text-white/60 shrink-0">MB</span>
             </div>
-
-            {/* 畫質分級 */}
-            {qualityTier && (
-              <div className="mt-3 pt-3 border-t border-white/10 flex flex-col gap-2">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs text-white/70">畫質分級</span>
-                  <span
-                    className="text-sm font-bold"
-                    style={{ color: qualityColor[qualityTier] }}
-                  >
-                    {qualityLabel[qualityTier]}
-                  </span>
+          ) : (
+            <>
+              {/* ── 影片資訊 ── */}
+              <section className="flex flex-col gap-2">
+                <h3 className="text-xs font-bold text-white/50 uppercase tracking-wider">
+                  影片資訊
+                </h3>
+                <div className="bg-white/5 rounded-[10px] p-3 flex flex-col gap-1.5 text-sm font-mono">
+                  <div className="flex justify-between">
+                    <span className="text-white/50">檔案名稱</span>
+                    <span className="text-white truncate max-w-[140px]">{video.name}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-white/50">原始大小</span>
+                    <span className="text-white">{fmtSize(originalSizeKB)}</span>
+                  </div>
+                  {videoInfo && (
+                    <>
+                      <div className="flex justify-between">
+                        <span className="text-white/50">原始解析度</span>
+                        <span className="text-white">
+                          {videoInfo.width} x {videoInfo.height}
+                        </span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-white/50">總時長</span>
+                        <span className="text-white">{fmtTime(videoInfo.duration)}</span>
+                      </div>
+                    </>
+                  )}
                 </div>
+              </section>
 
-                {/* 分級條 */}
-                <div className="h-1.5 bg-white/10 rounded-full overflow-hidden">
-                  <div
-                    className="h-full rounded-full transition-all duration-300"
-                    style={{
-                      width: `${Math.min(100, Math.max(5, (videoBitrateKbps ?? 0) / 40))}%`,
-                      background: qualityColor[qualityTier],
-                    }}
-                  />
-                </div>
-
-                <div className="flex justify-between text-xs font-mono text-white/40">
-                  <span>影像位元率</span>
-                  <span>{videoBitrateKbps} kbps</span>
-                </div>
-
-                {qualityTier === "danger" && (
-                  <div className="flex items-start gap-2 mt-1 p-2 bg-red-500/10 border border-red-500/30 rounded-lg">
-                    <svg className="w-4 h-4 text-red-400 shrink-0 mt-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                      <path d="M12 9v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                    </svg>
-                    <span className="text-xs text-red-300">
-                      檔案體積過小，畫質可能會嚴重受損
+              {/* ── 剪輯摘要 ── */}
+              <section className="flex flex-col gap-2">
+                <h3 className="text-xs font-bold text-white/50 uppercase tracking-wider">
+                  剪輯摘要
+                </h3>
+                <div className="bg-white/5 rounded-[10px] p-3 flex flex-col gap-1.5 text-sm font-mono">
+                  <div className="flex justify-between">
+                    <span className="text-white/50">裁切後時長</span>
+                    <span className="text-white">{fmtTime(trimDuration)}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-white/50">輸出尺寸</span>
+                    <span className="text-white">{cropW} x {cropH}</span>
+                  </div>
+                  {rotate !== 0 && (
+                    <div className="flex justify-between">
+                      <span className="text-white/50">旋轉</span>
+                      <span className="text-white">{rotate}°</span>
+                    </div>
+                  )}
+                  {(flipH || flipV) && (
+                    <div className="flex justify-between">
+                      <span className="text-white/50">翻轉</span>
+                      <span className="text-white">
+                        {[flipH && "水平", flipV && "垂直"].filter(Boolean).join(" + ")}
+                      </span>
+                    </div>
+                  )}
+                  <div className="flex justify-between">
+                    <span className="text-white/50">音訊</span>
+                    <span className="text-white">
+                      {includeAudio ? "保留" : "移除"}
                     </span>
                   </div>
-                )}
-              </div>
-            )}
-          </div>
-
-          {/* ── 匯出結果 ── */}
-          {outputInfo && (
-            <section className="flex flex-col gap-2">
-              <h3 className="text-xs font-bold text-white/50 uppercase tracking-wider">
-                匯出結果
-              </h3>
-              <div className="bg-white/5 rounded-[10px] p-3 flex flex-col gap-1.5 text-sm font-mono">
-                <div className="flex justify-between">
-                  <span className="text-white/50">輸出大小</span>
-                  <span className="text-[#00B4FF] font-bold">
-                    {fmtSize(outputInfo.output_size_kb ?? 0)}
-                  </span>
                 </div>
-                {outputInfo.video_bitrate_kbps && (
-                  <div className="flex justify-between">
-                    <span className="text-white/50">實際影像位元率</span>
-                    <span className="text-white">{outputInfo.video_bitrate_kbps} kbps</span>
+              </section>
+
+              {/* ── 目標檔案大小 ── */}
+              <div className="bg-white/10 rounded-[10px] p-3">
+                <p className="text-xs text-white/70 font-medium mb-3">目標檔案大小</p>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-white/70 shrink-0">目標</span>
+                  <input
+                    type="number"
+                    min={1}
+                    step={1}
+                    placeholder="不限制"
+                    value={targetInput}
+                    onChange={(e) => setTargetInput(e.target.value)}
+                    onBlur={commitTarget}
+                    onKeyDown={handleTargetKeyDown}
+                    disabled={exporting}
+                    className="w-20 px-2 py-1 text-sm input-vic disabled:opacity-40"
+                  />
+                  <span className="text-xs text-white/60 shrink-0">MB</span>
+                </div>
+
+                {/* 畫質分級 */}
+                {qualityTier && (
+                  <div className="mt-3 pt-3 border-t border-white/10 flex flex-col gap-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs text-white/70">畫質分級</span>
+                      <span
+                        className="text-sm font-bold"
+                        style={{ color: qualityColor[qualityTier] }}
+                      >
+                        {qualityLabel[qualityTier]}
+                      </span>
+                    </div>
+
+                    {/* 分級條 */}
+                    <div className="h-1.5 bg-white/10 rounded-full overflow-hidden">
+                      <div
+                        className="h-full rounded-full transition-all duration-300"
+                        style={{
+                          width: `${Math.min(100, Math.max(5, (videoBitrateKbps ?? 0) / 40))}%`,
+                          background: qualityColor[qualityTier],
+                        }}
+                      />
+                    </div>
+
+                    <div className="flex justify-between text-xs font-mono text-white/40">
+                      <span>影像位元率</span>
+                      <span>{videoBitrateKbps} kbps</span>
+                    </div>
+
+                    {qualityTier === "danger" && (
+                      <div className="flex items-start gap-2 mt-1 p-2 bg-red-500/10 border border-red-500/30 rounded-lg">
+                        <svg className="w-4 h-4 text-red-400 shrink-0 mt-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                          <path d="M12 9v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                        <span className="text-xs text-red-300">
+                          檔案體積過小，畫質可能會嚴重受損
+                        </span>
+                      </div>
+                    )}
                   </div>
                 )}
-                {outputInfo.warning && (
-                  <p className="text-xs text-yellow-400 mt-1">{outputInfo.warning}</p>
-                )}
               </div>
-            </section>
-          )}
 
-          {/* ── 錯誤訊息 ── */}
-          {error && (
-            <div className="p-3 bg-red-500/10 border border-red-500/30 rounded-[10px]">
-              <p className="text-sm text-red-300">{error}</p>
-            </div>
+              {/* ── 匯出結果 ── */}
+              {outputInfo && (
+                <section className="flex flex-col gap-2">
+                  <h3 className="text-xs font-bold text-white/50 uppercase tracking-wider">
+                    匯出結果
+                  </h3>
+                  <div className="bg-white/5 rounded-[10px] p-3 flex flex-col gap-1.5 text-sm font-mono">
+                    <div className="flex justify-between">
+                      <span className="text-white/50">輸出大小</span>
+                      <span className="text-[#00B4FF] font-bold">
+                        {fmtSize(outputInfo.output_size_kb ?? 0)}
+                      </span>
+                    </div>
+                    {outputInfo.video_bitrate_kbps && (
+                      <div className="flex justify-between">
+                        <span className="text-white/50">實際影像位元率</span>
+                        <span className="text-white">{outputInfo.video_bitrate_kbps} kbps</span>
+                      </div>
+                    )}
+                    {outputInfo.warning && (
+                      <p className="text-xs text-yellow-400 mt-1">{outputInfo.warning}</p>
+                    )}
+                  </div>
+                </section>
+              )}
+
+              {/* ── 錯誤訊息 ── */}
+              {error && (
+                <div className="p-3 bg-red-500/10 border border-red-500/30 rounded-[10px]">
+                  <p className="text-sm text-red-300">{error}</p>
+                </div>
+              )}
+            </>
           )}
         </div>
 
@@ -464,21 +574,67 @@ export function VideoExportPage({
         </div>
       </aside>
 
-      {/* ===== 右側預覽區 ===== */}
+      {/* ===== 右側預覽區 (永遠渲染，previewRef 永遠在 DOM) ===== */}
       <main className="flex-1 flex flex-col h-screen">
-        <div className="flex-1 bg-preview/5 flex items-center justify-center m-4 rounded-lg overflow-hidden relative">
-          <video
-            src={videoUrlRef.current}
-            className="max-w-full max-h-full"
-            style={{
-              transform: previewTransform || undefined,
-              transition: "transform 0.4s cubic-bezier(0.4, 0, 0.2, 1)",
-            }}
-            muted
-            autoPlay
-            loop
-            playsInline
-          />
+        <div
+          ref={previewRef}
+          className="flex-1 flex items-center justify-center m-4 rounded-lg overflow-hidden relative"
+          style={{ background: "#1a1a1a" }}
+        >
+          {/* 裁切容器 — hasCrop 時顯示 overflow:hidden + 精確尺寸，否則 display:contents 穿透 */}
+          <div
+            style={
+              hasCrop
+                ? {
+                    position: "relative" as const,
+                    overflow: "hidden" as const,
+                    width: cropContainerSize!.w,
+                    height: cropContainerSize!.h,
+                    flexShrink: 0,
+                    transform: previewTransform || undefined,
+                  }
+                : { display: "contents" as const }
+            }
+          >
+            {/* 單一 video 元素 — 永不 unmount，避免閃爍與 metadata 遺失 */}
+            <video
+              ref={videoRef}
+              src={videoUrl}
+              onLoadedMetadata={handleLoadedMetadata}
+              style={
+                hasCrop
+                  ? {
+                      position: "absolute" as const,
+                      width: `${(nativeSize!.w / clipConfig!.crop_w) * 100}%`,
+                      height: `${(nativeSize!.h / clipConfig!.crop_h) * 100}%`,
+                      left: `${-(clipConfig!.crop_x / clipConfig!.crop_w) * 100}%`,
+                      top: `${-(clipConfig!.crop_y / clipConfig!.crop_h) * 100}%`,
+                      maxWidth: "none",
+                    }
+                  : {
+                      maxWidth: "100%",
+                      maxHeight: "100%",
+                      transform: previewTransform || undefined,
+                    }
+              }
+              muted
+              autoPlay
+              playsInline
+            />
+          </div>
+
+          {/* 影片載入中 spinner overlay */}
+          {!nativeSize && (
+            <div className="absolute inset-0 flex items-center justify-center">
+              <div
+                className="w-10 h-10 rounded-full animate-spin"
+                style={{
+                  border: "3px solid rgba(255,255,255,0.15)",
+                  borderTopColor: "#00B4FF",
+                }}
+              />
+            </div>
+          )}
         </div>
 
         {/* 進度條 (匯出中 / 完成) */}

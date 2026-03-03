@@ -16,6 +16,7 @@ export interface VideoExportState {
   rotate: number;
   flipH: boolean;
   flipV: boolean;
+  savedClipState: { scale: number; cropRatio: string | null } | null;
 }
 
 function App() {
@@ -156,6 +157,7 @@ function App() {
         video={video}
         onExport={handleVideoExport}
         onReset={handleReset}
+        initialState={videoExportState}
       />
     );
   }
