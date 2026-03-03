@@ -635,6 +635,10 @@ function OutputSettingsPanel({
   const [heightInput, setHeightInput] = useState(String(settings.targetHeight));
   const [widthError, setWidthError] = useState(false);
   const [heightError, setHeightError] = useState(false);
+  const [targetSizeInput, setTargetSizeInput] = useState(String(settings.targetKB ?? ""));
+  const [targetUnit, setTargetUnit] = useState<"KB" | "MB" | "GB">("KB");
+
+  const unitToKB = { KB: 1, MB: 1024, GB: 1024 * 1024 };
 
   const { baseWidth, baseHeight, lockAspectRatio, format } = settings;
 
@@ -987,16 +991,16 @@ function OutputSettingsPanel({
             {settings.enableTargetKB && (
               <div className="space-y-2">
                 <div className="flex items-center gap-2">
-                  <span className="text-xs text-white/70 shrink-0">目標</span>
                   <input
                     type="number"
-                    min={1}
-                    max={10000}
-                    value={settings.targetKB ?? ""}
+                    min={0.1}
+                    step={0.1}
+                    value={targetSizeInput}
                     onChange={(e) => {
-                      const val = parseInt(e.target.value);
+                      setTargetSizeInput(e.target.value);
+                      const val = parseFloat(e.target.value);
                       onUpdateSettings({
-                        targetKB: isNaN(val) ? null : Math.max(1, val),
+                        targetKB: isNaN(val) || val <= 0 ? null : Math.round(val * unitToKB[targetUnit]),
                       });
                     }}
                     onBlur={() => {
@@ -1005,12 +1009,30 @@ function OutputSettingsPanel({
                     onKeyDown={(e) => {
                       if (e.key === "Enter") (e.target as HTMLInputElement).blur();
                     }}
-                    placeholder="KB"
-                    className="w-20 px-2 py-1 text-sm input-dark"
+                    placeholder={targetUnit}
+                    className="flex-1 min-w-0 px-2 py-1 text-sm input-dark"
                   />
-                  <span className="text-xs text-white/60 shrink-0">KB</span>
+                  <div className="flex rounded-md overflow-hidden border border-white/10 shrink-0">
+                    {(["KB", "MB", "GB"] as const).map((u) => (
+                      <button
+                        key={u}
+                        onClick={() => {
+                          setTargetUnit(u);
+                          setTargetSizeInput("");
+                          onUpdateSettings({ targetKB: null });
+                        }}
+                        className={`px-2 py-1 text-[11px] font-medium transition-colors ${
+                          targetUnit === u
+                            ? "bg-highlight text-black"
+                            : "bg-white/5 text-white/50 hover:bg-white/10"
+                        }`}
+                      >
+                        {u}
+                      </button>
+                    ))}
+                  </div>
 
-                  {/* 範圍切換：單張 / 全部 (放在 KB 右側，PDF 模式隱藏) */}
+                  {/* 範圍切換：單張 / 全部 (PDF 模式隱藏) */}
                   {images.length > 1 && downloadFormat !== "pdf" && (
                     <div className={`flex gap-0.5 bg-white/5 rounded-md p-0.5 shrink-0 ml-auto ${
                       !unifiedOutput ? "opacity-40 pointer-events-none" : ""

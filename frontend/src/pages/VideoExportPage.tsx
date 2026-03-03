@@ -49,6 +49,7 @@ export function VideoExportPage({
 
   // ── 目標大小 ──
   const [targetInput, setTargetInput] = useState("");
+  const [targetUnit, setTargetUnit] = useState<"KB" | "MB" | "GB">("MB");
   const [targetKB, setTargetKB] = useState<number | null>(null);
 
   // ── 編碼強度 ──
@@ -241,15 +242,18 @@ export function VideoExportPage({
     }
   }, []);
 
+  // ── 單位→KB 轉換倍率 ──
+  const unitToKB = { KB: 1, MB: 1024, GB: 1024 * 1024 };
+
   // ── 目標大小 commit ──
   const commitTarget = useCallback(() => {
     const val = parseFloat(targetInput);
     if (!isNaN(val) && val > 0) {
-      setTargetKB(Math.round(val * 1024));
+      setTargetKB(Math.round(val * unitToKB[targetUnit]));
     } else {
       setTargetKB(null);
     }
-  }, [targetInput]);
+  }, [targetInput, targetUnit]);
 
   const handleTargetKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -264,6 +268,7 @@ export function VideoExportPage({
       setTargetInput("");
       setTargetKB(null);
     } else {
+      setTargetUnit("MB");
       setTargetInput(String(mb));
       setTargetKB(mb * 1024);
     }
@@ -440,20 +445,34 @@ export function VideoExportPage({
               <div className="bg-white/10 rounded-[10px] p-3">
                 <p className="text-xs text-white/70 font-medium mb-3">目標檔案大小</p>
                 <div className="flex items-center gap-2">
-                  <span className="text-xs text-white/70 shrink-0">目標</span>
                   <input
                     type="number"
-                    min={1}
-                    step={1}
-                    placeholder="不限制"
+                    min={0.1}
+                    step={0.1}
+                    placeholder={targetUnit}
                     value={targetInput}
                     onChange={(e) => setTargetInput(e.target.value)}
                     onBlur={commitTarget}
                     onKeyDown={handleTargetKeyDown}
                     disabled={exporting}
-                    className="w-20 px-2 py-1 text-sm input-vic disabled:opacity-40"
+                    className="flex-1 min-w-0 px-2 py-1 text-sm input-vic disabled:opacity-40"
                   />
-                  <span className="text-xs text-white/60 shrink-0">MB</span>
+                  <div className="flex rounded-md overflow-hidden border border-white/10 shrink-0">
+                    {(["KB", "MB", "GB"] as const).map((u) => (
+                      <button
+                        key={u}
+                        onClick={() => { setTargetUnit(u); setTargetInput(""); setTargetKB(null); }}
+                        disabled={exporting}
+                        className={`px-2 py-1 text-[11px] font-medium transition-colors disabled:opacity-40 ${
+                          targetUnit === u
+                            ? "bg-[#00B4FF] text-white"
+                            : "bg-white/5 text-white/50 hover:bg-white/10"
+                        }`}
+                      >
+                        {u}
+                      </button>
+                    ))}
+                  </div>
                 </div>
 
                 {/* 畫質分級 */}
