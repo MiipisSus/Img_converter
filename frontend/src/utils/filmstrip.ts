@@ -1,0 +1,85 @@
+/**
+ * generateFilmstrip — 從影片檔擷取等間距縮圖
+ *
+ * 在記憶體中建立隱藏 <video> + <canvas>，
+ * 將影片切成 count 等分依序 seek 並 drawImage 產生 JPEG data URL。
+ */
+export async function generateFilmstrip(
+  file: File,
+  count = 10,
+): Promise<string[]> {
+  const url = URL.createObjectURL(file);
+
+  try {
+    const thumbnails = await extractFrames(url, count);
+    return thumbnails;
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+function extractFrames(url: string, count: number): Promise<string[]> {
+  return new Promise((resolve, reject) => {
+    const video = document.createElement("video");
+    video.muted = true;
+    video.preload = "auto";
+    video.playsInline = true;
+    video.src = url;
+
+    const onError = () => {
+      cleanup();
+      reject(new Error("影片載入失敗"));
+    };
+
+    const cleanup = () => {
+      video.removeEventListener("error", onError);
+      video.src = "";
+      video.load();
+    };
+
+    video.addEventListener("error", onError);
+
+    video.addEventListener("loadedmetadata", () => {
+      const duration = video.duration;
+      if (!duration || !isFinite(duration) || duration <= 0) {
+        cleanup();
+        reject(new Error("無法取得影片長度"));
+        return;
+      }
+
+      // Canvas 尺寸 — 小圖即可，高度固定 60px 按比例縮放
+      const thumbH = 60;
+      const thumbW = Math.round((video.videoWidth / video.videoHeight) * thumbH);
+      const canvas = document.createElement("canvas");
+      canvas.width = thumbW;
+      canvas.height = thumbH;
+      const ctx = canvas.getContext("2d")!;
+
+      const results: string[] = [];
+      let idx = 0;
+
+      // 每個等分的中心時間點
+      const interval = duration / count;
+
+      const captureNext = () => {
+        if (idx >= count) {
+          cleanup();
+          resolve(results);
+          return;
+        }
+
+        const targetTime = interval * idx + interval / 2;
+        video.currentTime = Math.min(targetTime, duration - 0.01);
+      };
+
+      video.addEventListener("seeked", () => {
+        ctx.drawImage(video, 0, 0, thumbW, thumbH);
+        results.push(canvas.toDataURL("image/jpeg", 0.5));
+        idx++;
+        captureNext();
+      });
+
+      captureNext();
+    });
+  });
+}

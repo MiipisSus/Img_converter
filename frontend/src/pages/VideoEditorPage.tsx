@@ -4,6 +4,7 @@ import { getVideoInfo, estimateVideo } from "../api/videoApi";
 import type { VideoInfoResult, BitrateEstimateResult } from "../api/videoApi";
 import { useVideoTransform } from "../hooks/useVideoTransform";
 import type { VideoTransformState } from "../hooks/useVideoTransform";
+import { generateFilmstrip } from "../utils/filmstrip";
 import vicLogo from "../assets/vic_logo.png";
 
 interface VideoEditorPageProps {
@@ -163,6 +164,7 @@ interface TrimSliderProps {
   startT: number;
   endT: number;
   currentTime: number;
+  filmstrip: string[];
   onStartChange: (v: number) => void;
   onEndChange: (v: number) => void;
   onSeek: (v: number) => void;
@@ -173,6 +175,7 @@ function TrimSlider({
   startT,
   endT,
   currentTime,
+  filmstrip,
   onStartChange,
   onEndChange,
   onSeek,
@@ -202,11 +205,11 @@ function TrimSlider({
 
   const handleTrackMouseDown = useCallback(
     (e: React.MouseEvent) => {
-      if ((e.target as HTMLElement).classList.contains("trim-slider__track")) {
-        const pos = posFromEvent(e);
-        onSeek(Math.max(startT, Math.min(endT, pos)));
-        draggingRef.current = "seek";
-      }
+      const target = e.target as HTMLElement;
+      if (target.closest(".trim-slider__thumb")) return;
+      const pos = posFromEvent(e);
+      onSeek(Math.max(startT, Math.min(endT, pos)));
+      draggingRef.current = "seek";
     },
     [posFromEvent, onSeek, startT, endT],
   );
@@ -237,28 +240,56 @@ function TrimSlider({
     };
   }, [duration, startT, endT, posFromEvent, onStartChange, onEndChange, onSeek]);
 
+  const startPct = toPercent(startT);
+  const endPct = toPercent(endT);
+
   return (
     <div className="trim-slider" ref={trackRef} onMouseDown={handleTrackMouseDown}>
-      <div className="trim-slider__track" />
+      {/* 縮圖膠捲背景 */}
+      {filmstrip.length > 0 && (
+        <div className="trim-slider__filmstrip">
+          {filmstrip.map((src, i) => (
+            <img key={i} src={src} alt="" draggable={false} />
+          ))}
+        </div>
+      )}
+
+      {/* 未選取區域暗層 — 左側 */}
+      <div
+        className="trim-slider__dim"
+        style={{ left: 0, width: `${startPct}%` }}
+      />
+      {/* 未選取區域暗層 — 右側 */}
+      <div
+        className="trim-slider__dim"
+        style={{ left: `${endPct}%`, width: `${100 - endPct}%` }}
+      />
+
+      {/* 選取區間藍色邊框 */}
       <div
         className="trim-slider__range"
         style={{
-          left: `${toPercent(startT)}%`,
-          width: `${toPercent(endT - startT)}%`,
+          left: `${startPct}%`,
+          width: `${endPct - startPct}%`,
         }}
       />
+
+      {/* 播放進度指示線 */}
       <div
         className="trim-slider__playhead"
         style={{ left: `${toPercent(currentTime)}%` }}
       />
+
+      {/* 左手把 */}
       <div
         className="trim-slider__thumb"
-        style={{ left: `${toPercent(startT)}%` }}
+        style={{ left: `${startPct}%` }}
         onMouseDown={handleMouseDown("start")}
       />
+      {/* 右手把 */}
       <div
         className="trim-slider__thumb"
-        style={{ left: `${toPercent(endT)}%` }}
+        style={{ left: `${endPct}%` }}
         onMouseDown={handleMouseDown("end")}
       />
     </div>
@@ -314,6 +345,10 @@ export function VideoEditorPage({ video, onReset }: VideoEditorPageProps) {
   // ── 剪輯狀態持久化 (重新進入時恢復) ──
   const [savedClipState, setSavedClipState] = useState<SavedClipState | null>(null);
   const [selectedCropRatio, setSelectedCropRatio] = useState<string | null>(null);
+
+  // ── 膠捲縮圖 (Filmstrip) ──
+  const [filmstrip, setFilmstrip] = useState<string[]>([]);
+  const filmstripCacheRef = useRef<{ fileId: string; frames: string[] } | null>(null);
 
   // ── 預覽區域尺寸 (用於裁切預覽計算) ──
   const [previewAreaSize, setPreviewAreaSize] = useState({ width: 800, height: 600 });
@@ -381,6 +416,25 @@ export function VideoEditorPage({ video, onReset }: VideoEditorPageProps) {
       });
     return () => { cancelled = true; };
   }, [video.file]);
+
+  // ── 產生膠捲縮圖 (帶快取) ──
+  useEffect(() => {
+    const cache = filmstripCacheRef.current;
+    if (cache && cache.fileId === video.id) {
+      setFilmstrip(cache.frames);
+      return;
+    }
+    let cancelled = false;
+    setFilmstrip([]);
+    generateFilmstrip(video.file, 12).then((frames) => {
+      if (cancelled) return;
+      filmstripCacheRef.current = { fileId: video.id, frames };
+      setFilmstrip(frames);
+    }).catch((err) => {
+      if (!cancelled) console.error("膠捲產生失敗:", err);
+    });
+    return () => { cancelled = true; };
+  }, [video.id, video.file]);
 
   // ── 追蹤預覽區域尺寸 (ResizeObserver) ──
   useEffect(() => {
@@ -1309,6 +1363,7 @@ export function VideoEditorPage({ video, onReset }: VideoEditorPageProps) {
                     startT={startT}
                     endT={endT}
                     currentTime={currentTime}
+                    filmstrip={filmstrip}
                     onStartChange={handleStartChange}
                     onEndChange={handleEndChange}
                     onSeek={handleSeek}

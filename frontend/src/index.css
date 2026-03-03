@@ -62,46 +62,78 @@ input[type="range"].slider-dark::-moz-range-thumb {
   box-shadow: 0 0 14px rgba(255, 255, 255, 0.45);
 }
 
-/* Video trim double range slider */
+/* Video trim double range slider — filmstrip style */
 .trim-slider {
   position: relative;
-  height: 32px;
+  height: 48px;
   user-select: none;
+  border-radius: 6px;
+  overflow: hidden;
+  background: #1a1a1a;
 }
 
-.trim-slider__track {
+/* 縮圖膠捲背景 */
+.trim-slider__filmstrip {
   position: absolute;
-  top: 50%;
-  left: 0;
-  right: 0;
-  height: 6px;
-  transform: translateY(-50%);
-  background: #747474;
-  border-radius: 3px;
+  inset: 0;
+  display: flex;
+  z-index: 0;
 }
 
+.trim-slider__filmstrip img {
+  flex: 1 1 0%;
+  min-width: 0;
+  height: 100%;
+  object-fit: cover;
+  pointer-events: none;
+}
+
+/* 未選取區域暗層 */
+.trim-slider__dim {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.65);
+  z-index: 1;
+}
+
+/* 選取區間 — 藍色邊框高亮 */
 .trim-slider__range {
   position: absolute;
-  top: 50%;
-  height: 6px;
-  transform: translateY(-50%);
-  background: #00B4FF;
-  border-radius: 3px;
+  top: 0;
+  height: 100%;
+  border-top: 2px solid #00B4FF;
+  border-bottom: 2px solid #00B4FF;
+  box-sizing: border-box;
+  z-index: 2;
+  pointer-events: none;
 }
 
+/* 左右手把 */
 .trim-slider__thumb {
   position: absolute;
-  top: 50%;
-  width: 18px;
-  height: 18px;
-  transform: translate(-50%, -50%);
+  top: 0;
+  width: 14px;
+  height: 100%;
+  transform: translateX(-50%);
   background: #00B4FF;
-  border: 2px solid #fff;
-  border-radius: 50%;
   cursor: grab;
-  box-shadow: 0 0 6px rgba(0, 180, 255, 0.5);
-  z-index: 2;
+  z-index: 3;
+  border-radius: 3px;
   transition: box-shadow 0.15s;
+  box-shadow: 0 0 6px rgba(0, 180, 255, 0.4);
+}
+
+.trim-slider__thumb::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 2px;
+  height: 16px;
+  background: rgba(255, 255, 255, 0.8);
+  border-radius: 1px;
 }
 
 .trim-slider__thumb:hover {
@@ -113,16 +145,18 @@ input[type="range"].slider-dark::-moz-range-thumb {
   box-shadow: 0 0 16px rgba(0, 180, 255, 0.9);
 }
 
+/* 播放進度指示線 */
 .trim-slider__playhead {
   position: absolute;
-  top: 50%;
-  width: 3px;
-  height: 22px;
-  transform: translate(-50%, -50%);
+  top: 0;
+  width: 2px;
+  height: 100%;
+  transform: translateX(-50%);
   background: #fff;
-  border-radius: 1.5px;
-  z-index: 1;
+  border-radius: 1px;
+  z-index: 4;
   pointer-events: none;
+  box-shadow: 0 0 4px rgba(255, 255, 255, 0.5);
 }
 
 /* Blue glow on hover */
