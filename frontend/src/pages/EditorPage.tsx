@@ -919,6 +919,39 @@ function CropToolPanel({
 }) {
   return (
     <div className="flex flex-col gap-3">
+      {/* 圖片資訊 */}
+      <div className="bg-white/10 rounded-[10px] p-3">
+        <p className="text-xs text-white/70 mb-2 font-medium">圖片資訊</p>
+        <div className="flex flex-col gap-1 text-xs text-white/50">
+          <div className="flex justify-between">
+            <span>原始尺寸</span>
+            <span className="text-white/80">
+              {pipelineState.imageInfo.naturalWidth} x {pipelineState.imageInfo.naturalHeight}
+            </span>
+          </div>
+          <div className="flex justify-between">
+            <span>裁切尺寸</span>
+            <span className="text-white/80">
+              {Math.round(
+                pipelineState.editorState.cropW /
+                  pipelineState.imageInfo.displayMultiplier,
+              )}{" "}
+              x{" "}
+              {Math.round(
+                pipelineState.editorState.cropH /
+                  pipelineState.imageInfo.displayMultiplier,
+              )}
+            </span>
+          </div>
+          <div className="flex justify-between">
+            <span>旋轉</span>
+            <span className="text-white/80">
+              {pipelineState.editorState.baseRotate}°
+            </span>
+          </div>
+        </div>
+      </div>
+
       {/* 進入裁切模式 */}
       <button
         onClick={onEnterCropMode}
@@ -982,23 +1015,6 @@ function CropToolPanel({
         </div>
       </div>
 
-      {/* 狀態資訊 */}
-      <div className="text-xs text-white/70 font-mono space-y-1 p-2">
-        <div>
-          裁切尺寸:{" "}
-          {Math.round(
-            pipelineState.editorState.cropW /
-              pipelineState.imageInfo.displayMultiplier,
-          )}{" "}
-          ×{" "}
-          {Math.round(
-            pipelineState.editorState.cropH /
-              pipelineState.imageInfo.displayMultiplier,
-          )}{" "}
-          px
-        </div>
-        <div>旋轉: {pipelineState.editorState.baseRotate}°</div>
-      </div>
     </div>
   );
 }

@@ -55,6 +55,27 @@ export interface ImageItem {
   exportQuality?: number;
 }
 
+// ─────────────────────────────────────────────
+// 影片剪輯相關型別
+// ─────────────────────────────────────────────
+
+/** 影片剪輯匯出配置 (原始像素座標，偶數修正後) */
+export interface ClipExportConfig {
+  start_t: number;
+  end_t: number;
+  crop_x: number;
+  crop_y: number;
+  crop_w: number;   // 偶數修正
+  crop_h: number;   // 偶數修正
+  include_audio: boolean;
+}
+
+/** 剪輯狀態持久化 (重新進入剪輯模式時恢復) */
+export interface SavedClipState {
+  scale: number;             // 縮放等級 (1-5)
+  cropRatio: string | null;  // "16:9" 等預設比例，null = 自由裁切
+}
+
 /** 輸出設定狀態 (暫態，返回裁切時會重置) */
 export interface OutputSettings {
   targetWidth: number;

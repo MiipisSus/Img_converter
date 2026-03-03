@@ -53,6 +53,9 @@ export function VideoExportPage({
   const [targetInput, setTargetInput] = useState("");
   const [targetKB, setTargetKB] = useState<number | null>(null);
 
+  // ── 編碼強度 ──
+  const [encodingPreset, setEncodingPreset] = useState<"fast" | "medium" | "veryslow">("medium");
+
   // ── 匯出狀態 ──
   const [exporting, setExporting] = useState(false);
   const [progress, setProgress] = useState(0);
@@ -77,6 +80,9 @@ export function VideoExportPage({
       : 0;
   const includeAudio = clipConfig?.include_audio ?? true;
   const originalSizeKB = videoInfo ? Math.round(videoInfo.file_size / 1024) : 0;
+  const estimatedSizeKB = videoInfo && videoInfo.duration > 0
+    ? Math.round(originalSizeKB * (trimDuration / videoInfo.duration))
+    : originalSizeKB;
 
   // 裁切後尺寸
   const cropW = clipConfig?.crop_w ?? videoInfo?.width ?? 0;
@@ -254,6 +260,17 @@ export function VideoExportPage({
     [commitTarget],
   );
 
+  // ── 導出預設 ──
+  const applyPreset = useCallback((mb: number | null) => {
+    if (mb === null) {
+      setTargetInput("");
+      setTargetKB(null);
+    } else {
+      setTargetInput(String(mb));
+      setTargetKB(mb * 1024);
+    }
+  }, []);
+
   // ── 匯出 ──
   const handleExport = useCallback(async () => {
     if (!videoInfo) return;
@@ -276,6 +293,7 @@ export function VideoExportPage({
         flip_h: flipH,
         flip_v: flipV,
         include_audio: includeAudio,
+        quality_preset: encodingPreset,
       });
 
       setTaskId(result.task_id);
@@ -372,72 +390,53 @@ export function VideoExportPage({
           ) : (
             <>
               {/* ── 影片資訊 ── */}
-              <section className="flex flex-col gap-2">
-                <h3 className="text-xs font-bold text-white/50 uppercase tracking-wider">
-                  影片資訊
-                </h3>
-                <div className="bg-white/5 rounded-[10px] p-3 flex flex-col gap-1.5 text-sm font-mono">
+              <div className="bg-white/10 rounded-[10px] p-3">
+                <p className="text-xs text-white/70 mb-2 font-medium">影片資訊</p>
+                <div className="flex flex-col gap-1 text-xs text-white/50">
                   <div className="flex justify-between">
-                    <span className="text-white/50">檔案名稱</span>
-                    <span className="text-white truncate max-w-[140px]">{video.name}</span>
+                    <span>檔案大小</span>
+                    <span className="text-white/80">≈ {fmtSize(estimatedSizeKB)}</span>
                   </div>
                   <div className="flex justify-between">
-                    <span className="text-white/50">原始大小</span>
-                    <span className="text-white">{fmtSize(originalSizeKB)}</span>
+                    <span>尺寸</span>
+                    <span className="text-white/80">{cropW} x {cropH}</span>
                   </div>
-                  {videoInfo && (
-                    <>
-                      <div className="flex justify-between">
-                        <span className="text-white/50">原始解析度</span>
-                        <span className="text-white">
-                          {videoInfo.width} x {videoInfo.height}
-                        </span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-white/50">總時長</span>
-                        <span className="text-white">{fmtTime(videoInfo.duration)}</span>
-                      </div>
-                    </>
-                  )}
+                  <div className="flex justify-between">
+                    <span>長度</span>
+                    <span className="text-white/80">{fmtTime(trimDuration)}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>音軌</span>
+                    <span className="text-white/80">{includeAudio ? "有" : "無"}</span>
+                  </div>
                 </div>
-              </section>
+              </div>
 
-              {/* ── 剪輯摘要 ── */}
-              <section className="flex flex-col gap-2">
-                <h3 className="text-xs font-bold text-white/50 uppercase tracking-wider">
-                  剪輯摘要
-                </h3>
-                <div className="bg-white/5 rounded-[10px] p-3 flex flex-col gap-1.5 text-sm font-mono">
-                  <div className="flex justify-between">
-                    <span className="text-white/50">裁切後時長</span>
-                    <span className="text-white">{fmtTime(trimDuration)}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-white/50">輸出尺寸</span>
-                    <span className="text-white">{cropW} x {cropH}</span>
-                  </div>
-                  {rotate !== 0 && (
-                    <div className="flex justify-between">
-                      <span className="text-white/50">旋轉</span>
-                      <span className="text-white">{rotate}°</span>
-                    </div>
-                  )}
-                  {(flipH || flipV) && (
-                    <div className="flex justify-between">
-                      <span className="text-white/50">翻轉</span>
-                      <span className="text-white">
-                        {[flipH && "水平", flipV && "垂直"].filter(Boolean).join(" + ")}
-                      </span>
-                    </div>
-                  )}
-                  <div className="flex justify-between">
-                    <span className="text-white/50">音訊</span>
-                    <span className="text-white">
-                      {includeAudio ? "保留" : "移除"}
-                    </span>
-                  </div>
+              {/* ── 導出預設 ── */}
+              <div className="bg-white/10 rounded-[10px] p-3">
+                <p className="text-xs text-white/70 font-medium mb-2">導出預設</p>
+                <div className="grid grid-cols-3 gap-2">
+                  {([
+                    { label: "社群媒體", mb: 8 },
+                    { label: "極致畫質", mb: null },
+                    { label: "超輕量", mb: 2 },
+                  ] as const).map(({ label, mb }) => (
+                    <button
+                      key={label}
+                      onClick={() => applyPreset(mb)}
+                      disabled={exporting}
+                      className={`px-1 py-2 text-[11px] font-medium rounded-lg transition-colors disabled:opacity-40 ${
+                        (mb === null && targetKB === null && targetInput === "")
+                        || (mb !== null && targetKB === mb * 1024)
+                          ? "bg-[#00B4FF] text-white"
+                          : "bg-white/5 text-white/60 hover:bg-white/10 border border-white/10"
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  ))}
                 </div>
-              </section>
+              </div>
 
               {/* ── 目標檔案大小 ── */}
               <div className="bg-white/10 rounded-[10px] p-3">
@@ -500,6 +499,34 @@ export function VideoExportPage({
                     )}
                   </div>
                 )}
+              </div>
+
+              {/* ── 編碼強度 ── */}
+              <div className="bg-white/10 rounded-[10px] p-3">
+                <p className="text-xs text-white/70 font-medium mb-2">編碼強度</p>
+                <div className="flex rounded-lg overflow-hidden border border-white/10">
+                  {([
+                    { key: "fast", label: "快速" },
+                    { key: "medium", label: "均衡" },
+                    { key: "veryslow", label: "高品質" },
+                  ] as const).map(({ key, label }) => (
+                    <button
+                      key={key}
+                      onClick={() => setEncodingPreset(key)}
+                      disabled={exporting}
+                      className={`flex-1 py-2 text-xs font-medium transition-colors disabled:opacity-40 ${
+                        encodingPreset === key
+                          ? "bg-[#00B4FF] text-white"
+                          : "bg-white/5 text-white/60 hover:bg-white/10"
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+                <p className="text-[10px] text-white/30 mt-2">
+                  {{ fast: "編碼速度快，適合快速預覽", medium: "速度與畫質均衡", veryslow: "最佳畫質，編碼時間較長" }[encodingPreset]}
+                </p>
               </div>
 
               {/* ── 匯出結果 ── */}

@@ -1,11 +1,13 @@
 import { useState, useCallback, useRef, useEffect, useMemo } from "react";
-import type { VideoItem } from "../types";
+import type { VideoItem, ClipExportConfig, SavedClipState } from "../types";
 import type { VideoExportState } from "../App";
-import { getVideoInfo, estimateVideo } from "../api/videoApi";
-import type { VideoInfoResult, BitrateEstimateResult } from "../api/videoApi";
+import { getVideoInfo } from "../api/videoApi";
+import type { VideoInfoResult } from "../api/videoApi";
 import { useVideoTransform } from "../hooks/useVideoTransform";
-import type { VideoTransformState } from "../hooks/useVideoTransform";
 import { generateFilmstrip } from "../utils/filmstrip";
+import { reconstructTransformFromCrop, getFinalVideoCropArea } from "../utils/videoCropMath";
+import { TrimSlider } from "../components/TrimSlider";
+import { CropOverlay } from "../components/CropOverlay";
 import vicLogo from "../assets/vic_logo.png";
 
 interface VideoEditorPageProps {
@@ -22,290 +24,8 @@ function formatTime(sec: number): string {
   return `${m}:${s.toFixed(1).padStart(4, "0")}`;
 }
 
-// ─────────────────────────────────────────────
-// ExportConfig — 統一輸出配置
-// ─────────────────────────────────────────────
-
-export interface ClipExportConfig {
-  start_t: number;
-  end_t: number;
-  crop_x: number;
-  crop_y: number;
-  crop_w: number;   // 偶數修正
-  crop_h: number;   // 偶數修正
-  include_audio: boolean;
-}
-
-// ─────────────────────────────────────────────
-// SavedClipState — 剪輯狀態持久化
-// ─────────────────────────────────────────────
-
-interface SavedClipState {
-  scale: number;             // 縮放等級 (1-5)
-  cropRatio: string | null;  // "16:9" 等預設比例，null = 自由裁切
-}
-
-// ─────────────────────────────────────────────
-// reconstructTransformFromCrop — 從原始像素座標反推 UI transform state
-// ─────────────────────────────────────────────
-// 用於重新進入剪輯模式時，根據新的容器尺寸重建裁切框
-// 裁切框居中於容器，translate 反推確保影片與裁切區域對齊
-
-function reconstructTransformFromCrop(
-  crop: { x: number; y: number; width: number; height: number },
-  savedScale: number,
-  videoW: number,
-  videoH: number,
-  containerW: number,
-  containerH: number,
-): VideoTransformState {
-  const M = Math.min(containerW / videoW, containerH / videoH);
-  const scale = savedScale;
-
-  // 裁切框 UI 尺寸 = 原始像素 × M × scale
-  let cropW = crop.width * M * scale;
-  let cropH = crop.height * M * scale;
-
-  // 確保裁切框不超出容器
-  cropW = Math.min(cropW, containerW);
-  cropH = Math.min(cropH, containerH);
-
-  // 裁切框居中於容器
-  const cropX = (containerW - cropW) / 2;
-  const cropY = (containerH - cropH) / 2;
-
-  // 反推 translate：讓裁切區域中心對齊裁切框中心
-  // UI_x = (cW - vW*M*s)/2 + tx + px*M*s
-  // 令 px = crop.x + crop.width/2，UI_x = cropX + cropW/2
-  const tx =
-    cropX + cropW / 2 -
-    (containerW - videoW * M * scale) / 2 -
-    (crop.x + crop.width / 2) * M * scale;
-  const ty =
-    cropY + cropH / 2 -
-    (containerH - videoH * M * scale) / 2 -
-    (crop.y + crop.height / 2) * M * scale;
-
-  return { scale, translateX: tx, translateY: ty, cropX, cropY, cropW, cropH };
-}
-
-// ─────────────────────────────────────────────
-// getFinalVideoCropArea — UI 座標→原始像素座標 (含偶數修正)
-// ─────────────────────────────────────────────
-//
-// 座標系統 (transform-origin: center center)：
-//   影片元素由 flexbox 居中於容器 → 元素中心 = 容器中心
-//   CSS transform: translate(tx,ty) scale(s)
-//     1. scale(s) 圍繞元素中心縮放
-//     2. translate(tx,ty) 平移
-//   → 影片視覺左上角 = (containerW - videoW*M*s)/2 + tx
-//
-//   容器中某點 (cropX, cropY) 對應的元素佈局座標：
-//     px = (cropX - vx) / scale = relX / scale
-//   轉換為原始像素：
-//     original_x = px / M = relX / (M * scale)
-//
-//   前提：videoW/H、M、CSS 元素尺寸 全部使用同一組尺寸來源
-//         (effectiveVideoW/H — 優先 video.videoWidth，fallback videoInfo)
-
-function getFinalVideoCropArea(
-  state: VideoTransformState,
-  M: number,
-  containerW: number,
-  containerH: number,
-  videoW: number,
-  videoH: number,
-): { x: number; y: number; width: number; height: number } {
-  const { scale, translateX: tx, translateY: ty, cropX, cropY, cropW, cropH } = state;
-
-  // 影片 CSS 元素的視覺尺寸
-  const vw = videoW * M * scale;
-  const vh = videoH * M * scale;
-
-  // 影片視覺左上角 (transform-origin: center, flexbox 居中)
-  const vx = (containerW - vw) / 2 + tx;
-  const vy = (containerH - vh) / 2 + ty;
-
-  // 裁切框相對於影片視覺左上角的偏移 (screen px)
-  const relX = cropX - vx;
-  const relY = cropY - vy;
-
-  // 每個原始像素 = M * scale 個顯示像素
-  const pixelScale = M * scale;
-  let x = Math.max(0, Math.round(relX / pixelScale));
-  let y = Math.max(0, Math.round(relY / pixelScale));
-  let w = Math.max(2, Math.round(cropW / pixelScale));
-  let h = Math.max(2, Math.round(cropH / pixelScale));
-
-  // Clamp 至影片邊界
-  x = Math.min(x, videoW - 2);
-  y = Math.min(y, videoH - 2);
-  w = Math.min(w, videoW - x);
-  h = Math.min(h, videoH - y);
-
-  // 偶數修正 — 符合影片編碼規範
-  w = Math.floor(w / 2) * 2;
-  h = Math.floor(h / 2) * 2;
-  x = Math.floor(x / 2) * 2;
-  y = Math.floor(y / 2) * 2;
-
-  // 修正後邊界安全檢查
-  if (x + w > videoW) x = videoW - w;
-  if (y + h > videoH) y = videoH - h;
-  if (x < 0) x = 0;
-  if (y < 0) y = 0;
-
-  return { x, y, width: w, height: h };
-}
-
-// ─────────────────────────────────────────────
-// TrimSlider — 雙向滑桿元件
-// ─────────────────────────────────────────────
-
-interface TrimSliderProps {
-  duration: number;
-  startT: number;
-  endT: number;
-  currentTime: number;
-  filmstrip: string[];
-  onStartChange: (v: number) => void;
-  onEndChange: (v: number) => void;
-  onSeek: (v: number) => void;
-  onDragStart?: () => void;
-  onDragEnd?: (target: "start" | "end" | "seek") => void;
-}
-
-function TrimSlider({
-  duration,
-  startT,
-  endT,
-  currentTime,
-  filmstrip,
-  onStartChange,
-  onEndChange,
-  onSeek,
-  onDragStart,
-  onDragEnd,
-}: TrimSliderProps) {
-  const trackRef = useRef<HTMLDivElement>(null);
-  const draggingRef = useRef<"start" | "end" | "seek" | null>(null);
-
-  const toPercent = (v: number) => (duration > 0 ? (v / duration) * 100 : 0);
-
-  const posFromEvent = useCallback(
-    (e: MouseEvent | React.MouseEvent) => {
-      const rect = trackRef.current?.getBoundingClientRect();
-      if (!rect || duration <= 0) return 0;
-      const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-      return ratio * duration;
-    },
-    [duration],
-  );
-
-  const handleMouseDown = useCallback(
-    (target: "start" | "end") => (e: React.MouseEvent) => {
-      e.preventDefault();
-      draggingRef.current = target;
-      onDragStart?.();
-    },
-    [onDragStart],
-  );
-
-  const handleTrackMouseDown = useCallback(
-    (e: React.MouseEvent) => {
-      const target = e.target as HTMLElement;
-      if (target.closest(".trim-slider__thumb")) return;
-      const pos = posFromEvent(e);
-      onSeek(Math.max(startT, Math.min(endT, pos)));
-      draggingRef.current = "seek";
-      onDragStart?.();
-    },
-    [posFromEvent, onSeek, startT, endT, onDragStart],
-  );
-
-  useEffect(() => {
-    const handleMouseMove = (e: MouseEvent) => {
-      const d = draggingRef.current;
-      if (!d) return;
-      const pos = Math.round(posFromEvent(e) * 10) / 10;
-      if (d === "start") {
-        onStartChange(Math.max(0, Math.min(pos, endT - 0.1)));
-      } else if (d === "end") {
-        onEndChange(Math.max(startT + 0.1, Math.min(pos, duration)));
-      } else if (d === "seek") {
-        onSeek(Math.max(startT, Math.min(endT, pos)));
-      }
-    };
-
-    const handleMouseUp = () => {
-      const d = draggingRef.current;
-      draggingRef.current = null;
-      if (d) onDragEnd?.(d);
-    };
-
-    window.addEventListener("mousemove", handleMouseMove);
-    window.addEventListener("mouseup", handleMouseUp);
-    return () => {
-      window.removeEventListener("mousemove", handleMouseMove);
-      window.removeEventListener("mouseup", handleMouseUp);
-    };
-  }, [duration, startT, endT, posFromEvent, onStartChange, onEndChange, onSeek, onDragEnd]);
-
-  const startPct = toPercent(startT);
-  const endPct = toPercent(endT);
-
-  return (
-    <div className="trim-slider" ref={trackRef} onMouseDown={handleTrackMouseDown}>
-      {/* 縮圖膠捲背景 */}
-      {filmstrip.length > 0 && (
-        <div className="trim-slider__filmstrip">
-          {filmstrip.map((src, i) => (
-            <img key={i} src={src} alt="" draggable={false} />
-          ))}
-        </div>
-      )}
-
-      {/* 未選取區域暗層 — 左側 */}
-      <div
-        className="trim-slider__dim"
-        style={{ left: 0, width: `${startPct}%` }}
-      />
-      {/* 未選取區域暗層 — 右側 */}
-      <div
-        className="trim-slider__dim"
-        style={{ left: `${endPct}%`, width: `${100 - endPct}%` }}
-      />
-
-      {/* 選取區間藍色邊框 */}
-      <div
-        className="trim-slider__range"
-        style={{
-          left: `${startPct}%`,
-          width: `${endPct - startPct}%`,
-        }}
-      />
-
-      {/* 播放進度指示線 */}
-      <div
-        className="trim-slider__playhead"
-        style={{ left: `${toPercent(currentTime)}%` }}
-      />
-
-      {/* 左手把 */}
-      <div
-        className="trim-slider__thumb"
-        style={{ left: `${startPct}%` }}
-        onMouseDown={handleMouseDown("start")}
-      />
-      {/* 右手把 */}
-      <div
-        className="trim-slider__thumb"
-        style={{ left: `${endPct}%` }}
-        onMouseDown={handleMouseDown("end")}
-      />
-    </div>
-  );
-}
+// Re-export types for consumers that previously imported from this file
+export type { ClipExportConfig, SavedClipState } from "../types";
 
 // ─────────────────────────────────────────────
 // VideoEditorPage — 主頁面
@@ -345,9 +65,6 @@ export function VideoEditorPage({ video, onExport, onReset, initialState }: Vide
   const [includeAudio, setIncludeAudio] = useState(initialState?.clipConfig?.include_audio ?? true);
   const handleToggleAudio = useCallback(() => setIncludeAudio((prev) => !prev), []);
 
-  // ── 預估結果 ──
-  const [estimate, setEstimate] = useState<BitrateEstimateResult | null>(null);
-  const [estimating, setEstimating] = useState(false);
 
   // ── 空間裁切 (clip 模式共用) ──
   const [cropContainerSize, setCropContainerSize] = useState({ width: 800, height: 600 });
@@ -376,7 +93,6 @@ export function VideoEditorPage({ video, onExport, onReset, initialState }: Vide
   // ── Refs ──
   const videoRef = useRef<HTMLVideoElement>(null);
   const videoUrlRef = useRef<string>("");
-  const estimateTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   const clipAreaRef = useRef<HTMLDivElement>(null);
   const dragStartRef = useRef({ x: 0, y: 0, translateX: 0, translateY: 0, cropX: 0, cropY: 0, cropW: 0, cropH: 0 });
 
@@ -538,37 +254,14 @@ export function VideoEditorPage({ video, onExport, onReset, initialState }: Vide
     };
   }, [mode, exportConfig]);
 
-  // ── 預估觸發 (debounce 800ms) ──
-  useEffect(() => {
-    if (mode !== "clip" || !videoInfo) return;
 
-    if (estimateTimerRef.current) clearTimeout(estimateTimerRef.current);
-
-    estimateTimerRef.current = setTimeout(async () => {
-      setEstimating(true);
-      try {
-        const result = await estimateVideo(video.file, {
-          include_audio: includeAudio,
-        });
-        setEstimate(result);
-      } catch (err) {
-        console.error("預估失敗:", err);
-      } finally {
-        setEstimating(false);
-      }
-    }, 800);
-
-    return () => {
-      if (estimateTimerRef.current) clearTimeout(estimateTimerRef.current);
-    };
-  }, [mode, trimDuration, includeAudio, video.file, videoInfo]);
-
-  // ── 預估檔案大小 (根據裁剪比例) ──
+  // ── 預估檔案大小 (直接從 videoInfo.file_size 按時長比例計算) ──
   const estimatedSizeKB = useMemo(() => {
-    if (!estimate || !duration) return null;
+    if (!videoInfo || !duration || duration <= 0) return null;
+    const originalKB = Math.round(videoInfo.file_size / 1024);
     const ratio = trimDuration / duration;
-    return Math.round(estimate.original_size_kb * ratio);
-  }, [estimate, duration, trimDuration]);
+    return Math.round(originalKB * ratio);
+  }, [videoInfo, duration, trimDuration]);
 
   // ── 旋轉 ──
   const handleRotate = useCallback((direction: "left" | "right") => {
@@ -974,33 +667,45 @@ export function VideoEditorPage({ video, onExport, onReset, initialState }: Vide
             <p className="text-xs text-white/70 mb-2 font-medium">影片資訊</p>
             <div className="flex flex-col gap-1 text-xs text-white/50">
               <div className="flex justify-between">
-                <span>檔案名稱</span>
-                <span className="text-white/80 truncate max-w-[140px]">{video.name}</span>
+                <span>檔案大小</span>
+                <span className="text-white/80">
+                  {exportConfig && estimatedSizeKB != null
+                    ? estimatedSizeKB > 1024
+                      ? `≈ ${(estimatedSizeKB / 1024).toFixed(1)} MB`
+                      : `≈ ${estimatedSizeKB} KB`
+                    : sizeDisplay}
+                </span>
               </div>
               <div className="flex justify-between">
-                <span>檔案大小</span>
-                <span className="text-white/80">{sizeDisplay}</span>
+                <span>尺寸</span>
+                <span className="text-white/80">
+                  {exportConfig
+                    ? `${exportConfig.crop_w} x ${exportConfig.crop_h}`
+                    : videoInfo
+                      ? `${videoInfo.width} x ${videoInfo.height}`
+                      : "—"}
+                </span>
               </div>
-              {videoInfo && (
-                <>
-                  <div className="flex justify-between">
-                    <span>長度</span>
-                    <span className="text-white/80">{formatTime(videoInfo.duration)}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span>解析度</span>
-                    <span className="text-white/80">{videoInfo.width} x {videoInfo.height}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span>FPS</span>
-                    <span className="text-white/80">{videoInfo.fps.toFixed(1)}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span>音軌</span>
-                    <span className="text-white/80">{videoInfo.has_audio ? "有" : "無"}</span>
-                  </div>
-                </>
-              )}
+              <div className="flex justify-between">
+                <span>長度</span>
+                <span className="text-white/80">
+                  {exportConfig
+                    ? formatTime(exportConfig.end_t - exportConfig.start_t)
+                    : videoInfo
+                      ? formatTime(videoInfo.duration)
+                      : "—"}
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span>音軌</span>
+                <span className="text-white/80">
+                  {exportConfig
+                    ? exportConfig.include_audio ? "有" : "無"
+                    : videoInfo
+                      ? videoInfo.has_audio ? "有" : "無"
+                      : "—"}
+                </span>
+              </div>
             </div>
           </div>
 
@@ -1065,22 +770,6 @@ export function VideoEditorPage({ video, onExport, onReset, initialState }: Vide
                 </div>
               </div>
 
-              {/* 狀態資訊 */}
-              <div className="text-xs text-white/70 font-mono space-y-1 p-2">
-                {videoInfo && (
-                  <>
-                    <div>解析度: {videoInfo.width} x {videoInfo.height}</div>
-                    <div>長度: {formatTime(videoInfo.duration)}</div>
-                  </>
-                )}
-                <div>旋轉: {((baseRotate % 360) + 360) % 360}°</div>
-                {exportConfig && (
-                  <>
-                    <div>時間: {formatTime(exportConfig.start_t)} – {formatTime(exportConfig.end_t)}</div>
-                    <div>裁切: {exportConfig.crop_w} x {exportConfig.crop_h} @ ({exportConfig.crop_x}, {exportConfig.crop_y})</div>
-                  </>
-                )}
-              </div>
             </div>
           )}
 
@@ -1116,13 +805,11 @@ export function VideoEditorPage({ video, onExport, onReset, initialState }: Vide
                   <div className="flex justify-between items-center">
                     <span className="text-xs text-white/50">預估大小</span>
                     <span className="text-sm font-mono text-white/80">
-                      {estimating
-                        ? "計算中..."
-                        : estimatedSizeKB != null
-                          ? estimatedSizeKB > 1024
-                            ? `${(estimatedSizeKB / 1024).toFixed(1)} MB`
-                            : `${estimatedSizeKB} KB`
-                          : "—"}
+                      {estimatedSizeKB != null
+                        ? estimatedSizeKB > 1024
+                          ? `${(estimatedSizeKB / 1024).toFixed(1)} MB`
+                          : `${estimatedSizeKB} KB`
+                        : "—"}
                     </span>
                   </div>
                 </div>
@@ -1206,16 +893,6 @@ export function VideoEditorPage({ video, onExport, onReset, initialState }: Vide
                 />
               </div>
 
-              {/* 裁切尺寸資訊 — effectiveVideoW/H 與 hook M 同源，直接除以 pixelScale */}
-              {videoInfo && (
-                <div className="text-xs text-white/70 font-mono space-y-1 p-2">
-                  <div>
-                    裁切: {Math.round(cropW / (transform.displayMultiplier * transform.state.scale))} x{" "}
-                    {Math.round(cropH / (transform.displayMultiplier * transform.state.scale))} px
-                  </div>
-                  <div>原始: {effectiveVideoW} x {effectiveVideoH}</div>
-                </div>
-              )}
             </div>
           )}
         </div>
@@ -1301,121 +978,14 @@ export function VideoEditorPage({ video, onExport, onReset, initialState }: Vide
                     />
                   </div>
 
-                  {/* 遮罩層 */}
-                  <div className="absolute inset-0 pointer-events-none">
-                    <div
-                      className="absolute bg-black/50"
-                      style={{ top: 0, left: 0, right: 0, height: cropY, transition: cropTransition }}
-                    />
-                    <div
-                      className="absolute bg-black/50"
-                      style={{ top: cropY + cropH, left: 0, right: 0, bottom: 0, transition: cropTransition }}
-                    />
-                    <div
-                      className="absolute bg-black/50"
-                      style={{ top: cropY, left: 0, width: cropX, height: cropH, transition: cropTransition }}
-                    />
-                    <div
-                      className="absolute bg-black/50"
-                      style={{
-                        top: cropY,
-                        left: cropX + cropW,
-                        right: 0,
-                        height: cropH,
-                        transition: cropTransition,
-                      }}
-                    />
-                  </div>
-                </div>
-
-                {/* 裁切框 + 手把 */}
-                <div
-                  className="absolute border-2 pointer-events-none"
-                  style={{
-                    left: cropX,
-                    top: cropY,
-                    width: cropW,
-                    height: cropH,
-                    borderColor: "#00B4FF",
-                    transition: cropTransition,
-                  }}
-                >
-                  {/* 九宮格 */}
-                  <div className="absolute inset-0 grid grid-cols-3 grid-rows-3 pointer-events-none">
-                    {[...Array(9)].map((_, i) => (
-                      <div
-                        key={i}
-                        className="border"
-                        style={{ borderColor: "rgba(0, 180, 255, 0.3)" }}
-                      />
-                    ))}
-                  </div>
-
-                  {/* 四角 Handles */}
-                  {(["nw", "ne", "sw", "se"] as const).map((handle) => (
-                    <div
-                      key={handle}
-                      className="absolute w-4 h-4 pointer-events-auto"
-                      style={{
-                        top: handle.includes("n") ? -8 : "auto",
-                        bottom: handle.includes("s") ? -8 : "auto",
-                        left: handle.includes("w") ? -8 : "auto",
-                        right: handle.includes("e") ? -8 : "auto",
-                        cursor:
-                          handle === "nw" || handle === "se"
-                            ? "nwse-resize"
-                            : "nesw-resize",
-                        backgroundColor: "#00B4FF",
-                        borderRadius: 2,
-                      }}
-                      onMouseDown={handleCropResizeMouseDown(handle)}
-                    />
-                  ))}
-
-                  {/* 四邊 Handles */}
-                  {(["n", "s", "e", "w"] as const).map((handle) => (
-                    <div
-                      key={handle}
-                      className="absolute pointer-events-auto"
-                      style={{
-                        backgroundColor: "#00B4FF",
-                        borderRadius: 3,
-                        ...(handle === "n" && {
-                          top: -3,
-                          left: "50%",
-                          transform: "translateX(-50%)",
-                          width: 30,
-                          height: 6,
-                          cursor: "ns-resize",
-                        }),
-                        ...(handle === "s" && {
-                          bottom: -3,
-                          left: "50%",
-                          transform: "translateX(-50%)",
-                          width: 30,
-                          height: 6,
-                          cursor: "ns-resize",
-                        }),
-                        ...(handle === "w" && {
-                          left: -3,
-                          top: "50%",
-                          transform: "translateY(-50%)",
-                          width: 6,
-                          height: 30,
-                          cursor: "ew-resize",
-                        }),
-                        ...(handle === "e" && {
-                          right: -3,
-                          top: "50%",
-                          transform: "translateY(-50%)",
-                          width: 6,
-                          height: 30,
-                          cursor: "ew-resize",
-                        }),
-                      }}
-                      onMouseDown={handleCropResizeMouseDown(handle)}
-                    />
-                  ))}
+                  <CropOverlay
+                    cropX={cropX}
+                    cropY={cropY}
+                    cropW={cropW}
+                    cropH={cropH}
+                    transition={cropTransition}
+                    onResizeMouseDown={handleCropResizeMouseDown}
+                  />
                 </div>
               </div>
 

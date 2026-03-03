@@ -1,11 +1,10 @@
 import { useState, useCallback, useRef, useMemo, useEffect } from "react";
-import type { AppStep, PipelineState, ImageItem, VideoItem } from "./types";
+import type { AppStep, PipelineState, ImageItem, VideoItem, ClipExportConfig } from "./types";
 import { UploadPage } from "./pages/UploadPage";
 import { EditorPage } from "./pages/EditorPage";
 import { ExportPage } from "./pages/ExportPage";
 import { VideoEditorPage } from "./pages/VideoEditorPage";
 import { VideoExportPage } from "./pages/VideoExportPage";
-import type { ClipExportConfig } from "./pages/VideoEditorPage";
 
 /** 應用模式：上傳頁 / 圖片流程 / 影片流程 */
 type AppMode = "upload" | "pic" | "vic";
