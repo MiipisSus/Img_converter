@@ -442,6 +442,7 @@ export function VideoEditorPage({ video, onReset }: VideoEditorPageProps) {
   }, [mode, exportConfig]);
 
   // ── 監聽播放/暫停事件同步狀態 ──
+  // mode 切換時 video 元素會重建，需重新綁定事件
   useEffect(() => {
     const el = videoRef.current;
     if (!el) return;
@@ -449,11 +450,13 @@ export function VideoEditorPage({ video, onReset }: VideoEditorPageProps) {
     const onPause = () => setIsPlaying(false);
     el.addEventListener("play", onPlay);
     el.addEventListener("pause", onPause);
+    // 同步初始狀態 (新掛載的 video 可能已在播放)
+    setIsPlaying(!el.paused);
     return () => {
       el.removeEventListener("play", onPlay);
       el.removeEventListener("pause", onPause);
     };
-  }, []);
+  }, [mode, exportConfig]);
 
   // ── 預估觸發 (debounce 800ms) ──
   useEffect(() => {
@@ -557,14 +560,9 @@ export function VideoEditorPage({ video, onReset }: VideoEditorPageProps) {
 
     setCropContainerSize({ width: cW, height: cH });
     setMode("clip");
-
-    // 從 startT 開始播放
-    if (vid) {
-      vid.loop = false;
-      vid.currentTime = startT;
-      setCurrentTime(startT);
-    }
-  }, [videoInfo, startT]);
+    // 注意：不在此處 seek — 因為 setMode 會觸發 video 元素重建，
+    // seek 和 play 在 mode-change useEffect 中處理（新元素已掛載）
+  }, [videoInfo]);
 
   // 進入 clip 模式後：恢復已儲存的狀態 或 完整重置
   const prevModeRef = useRef<EditorMode>("default");
@@ -589,14 +587,19 @@ export function VideoEditorPage({ video, onReset }: VideoEditorPageProps) {
         transform.reset();
         setSelectedCropRatio(null);
       }
-      // 在下一幀開始播放 (確保 video ref 已掛載)
+      // 在下一幀 seek 到 startT 並開始播放 (確保 video ref 已掛載)
       requestAnimationFrame(() => {
         const vid = videoRef.current;
-        if (vid) vid.play();
+        if (vid) {
+          vid.loop = false;
+          vid.currentTime = startT;
+          setCurrentTime(startT);
+          vid.play();
+        }
       });
     }
     prevModeRef.current = mode;
-  }, [mode, savedClipState, exportConfig, effectiveVideoW, effectiveVideoH, cropContainerSize, transform]);
+  }, [mode, savedClipState, exportConfig, effectiveVideoW, effectiveVideoH, cropContainerSize, transform, startT]);
 
   // ── 套用剪輯 — 同時輸出時間 + 空間參數 ──
   const handleConfirmClip = useCallback(() => {
@@ -691,8 +694,9 @@ export function VideoEditorPage({ video, onReset }: VideoEditorPageProps) {
   const handleEndChange = useCallback(
     (v: number) => {
       setEndT(v);
+      // 拖曳結束點時同步 seek，讓使用者看到該時間點的畫面
       const el = videoRef.current;
-      if (el && el.currentTime > v) {
+      if (el) {
         el.currentTime = v;
         setCurrentTime(v);
       }
