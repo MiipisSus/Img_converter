@@ -249,6 +249,33 @@ class VideoService:
         finally:
             os.unlink(tmp_path)
 
+    def generate_gif_preview(self, gif_bytes: bytes) -> bytes:
+        """將 GIF 轉為預覽用 MP4 (ultrafast, yuv420p, 無音訊)"""
+        from moviepy import VideoFileClip
+
+        tmp_input = self._write_temp(gif_bytes, suffix=".gif")
+        tmp_output = tempfile.mktemp(suffix=".mp4")
+
+        try:
+            clip = VideoFileClip(tmp_input)
+            clip.write_videofile(
+                tmp_output,
+                codec="libx264",
+                preset="ultrafast",
+                ffmpeg_params=["-pix_fmt", "yuv420p"],
+                audio=False,
+                logger=None,
+            )
+            clip.close()
+
+            with open(tmp_output, "rb") as f:
+                return f.read()
+        finally:
+            if os.path.exists(tmp_input):
+                os.unlink(tmp_input)
+            if os.path.exists(tmp_output):
+                os.unlink(tmp_output)
+
     def process_video(
         self,
         video_bytes: bytes,

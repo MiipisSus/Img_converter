@@ -15,7 +15,7 @@ from functools import partial
 from concurrent.futures import ThreadPoolExecutor
 
 from fastapi import APIRouter, File, UploadFile, Form, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 
 from ..schemas.videos import (
     VideoInfoResponse,
@@ -49,6 +49,9 @@ MAX_VIDEO_SIZE = 500 * 1024 * 1024
 
 # ── 全域任務狀態管理 (In-Memory Store) ──
 video_tasks: Dict[str, Dict[str, Any]] = {}
+
+# ── GIF 預覽 MP4 快取 (In-Memory) ──
+gif_previews: Dict[str, bytes] = {}
 
 
 def _validate_video_extension(filename: str) -> str:
@@ -155,9 +158,34 @@ async def get_video_info(
     try:
         service = VideoService()
         info = await _run_in_executor(service.get_video_info, video_bytes, f".{ext}")
+
+        # GIF → 同步產生 MP4 預覽
+        if ext == "gif":
+            preview_bytes = await _run_in_executor(
+                service.generate_gif_preview, video_bytes,
+            )
+            preview_id = uuid.uuid4().hex[:12]
+            gif_previews[preview_id] = preview_bytes
+            info["preview_url"] = f"/api/videos/preview/{preview_id}"
+
         return VideoInfoResponse(**info)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"影片資訊讀取失敗：{str(e)}")
+
+
+# ── GIF 預覽 MP4 取得 ──
+
+@router.get(
+    "/preview/{preview_id}",
+    summary="取得 GIF 預覽 MP4",
+    description="回傳由 /videos/info 產生的 GIF 預覽用 MP4 影片",
+    responses={200: {"content": {"video/mp4": {}}}, 404: {"description": "預覽不存在"}},
+)
+async def get_gif_preview(preview_id: str):
+    data = gif_previews.get(preview_id)
+    if not data:
+        raise HTTPException(status_code=404, detail="預覽不存在或已過期")
+    return Response(content=data, media_type="video/mp4")
 
 
 # ── 位元率預估 (不壓縮) ──

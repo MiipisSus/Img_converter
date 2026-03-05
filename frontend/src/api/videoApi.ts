@@ -7,6 +7,7 @@ export interface VideoInfoResult {
   fps: number;
   has_audio: boolean;
   file_size: number;
+  preview_url?: string;
 }
 
 export interface BitrateEstimateResult {

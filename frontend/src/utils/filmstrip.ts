@@ -5,16 +5,18 @@
  * 將影片切成 count 等分依序 seek 並 drawImage 產生 JPEG data URL。
  */
 export async function generateFilmstrip(
-  file: File,
+  source: File | string,
   count = 10,
 ): Promise<string[]> {
-  const url = URL.createObjectURL(file);
+  // string → 直接當作 URL；File → 建立 ObjectURL
+  const isUrl = typeof source === "string";
+  const url = isUrl ? source : URL.createObjectURL(source);
 
   try {
     const thumbnails = await extractFrames(url, count);
     return thumbnails;
   } finally {
-    URL.revokeObjectURL(url);
+    if (!isUrl) URL.revokeObjectURL(url);
   }
 }
 

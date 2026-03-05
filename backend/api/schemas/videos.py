@@ -16,6 +16,7 @@ class VideoInfoResponse(BaseModel):
     fps: float = Field(description="每秒幀數")
     has_audio: bool = Field(description="是否包含音軌")
     file_size: int = Field(description="檔案大小 (bytes)")
+    preview_url: Optional[str] = Field(default=None, description="GIF 預覽用 MP4 的 URL")
 
 
 class BitrateEstimateResponse(BaseModel):

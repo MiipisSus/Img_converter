@@ -71,7 +71,7 @@ export interface UseVideoTransformOptions {
 }
 
 export function useVideoTransform(options: UseVideoTransformOptions) {
-  const { videoWidth, videoHeight, containerWidth, containerHeight, minCropSize = 50 } = options
+  const { videoWidth, videoHeight, containerWidth, containerHeight, minCropSize: _minCropSize = 50 } = options
 
   const [state, setState] = useState<VideoTransformState>(() => ({
     ...DEFAULT_STATE,

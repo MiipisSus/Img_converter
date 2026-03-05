@@ -50,6 +50,7 @@ export function VideoExportPage({
 
   // ── 影片 URL ──
   const [videoUrl, setVideoUrl] = useState("");
+  const [gifPreviewUrl, setGifPreviewUrl] = useState<string | null>(null);
   const [showResetModal, setShowResetModal] = useState(false);
 
   // ── 目標大小 ──
@@ -215,13 +216,18 @@ export function VideoExportPage({
   // ── 是否啟用裁切預覽 ──
   const hasCrop = !!(clipConfig && nativeSize && cropContainerSize);
 
+  // ── GIF 預覽 MP4 優先 ──
+  const effectiveVideoSrc = (isGifSource && gifPreviewUrl) ? gifPreviewUrl : videoUrl;
+
   // ── 載入影片資訊 (API，用於 sidebar) ──
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
     getVideoInfo(video.file)
       .then((info) => {
-        if (!cancelled) setVideoInfo(info);
+        if (cancelled) return;
+        setVideoInfo(info);
+        if (info.preview_url) setGifPreviewUrl(info.preview_url);
       })
       .catch((err) => console.error("取得影片資訊失敗:", err))
       .finally(() => {
@@ -858,60 +864,31 @@ export function VideoExportPage({
                 : { display: "contents" as const }
             }
           >
-            {/* 預覽元素 — GIF 使用 img，影片使用 video */}
-            {isGifSource ? (
-              <img
-                src={videoUrl}
-                onLoad={(e) => {
-                  const img = e.currentTarget;
-                  if (img.naturalWidth > 0) {
-                    setNativeSize({ w: img.naturalWidth, h: img.naturalHeight });
-                  }
-                }}
-                style={
-                  hasCrop
-                    ? {
-                        position: "absolute" as const,
-                        width: `${(nativeSize!.w / clipConfig!.crop_w) * 100}%`,
-                        height: `${(nativeSize!.h / clipConfig!.crop_h) * 100}%`,
-                        left: `${-(clipConfig!.crop_x / clipConfig!.crop_w) * 100}%`,
-                        top: `${-(clipConfig!.crop_y / clipConfig!.crop_h) * 100}%`,
-                        maxWidth: "none",
-                      }
-                    : {
-                        maxWidth: "100%",
-                        maxHeight: "100%",
-                        transform: previewTransform || undefined,
-                      }
-                }
-                draggable={false}
-              />
-            ) : (
-              <video
-                ref={videoRef}
-                src={videoUrl}
-                onLoadedMetadata={handleLoadedMetadata}
-                style={
-                  hasCrop
-                    ? {
-                        position: "absolute" as const,
-                        width: `${(nativeSize!.w / clipConfig!.crop_w) * 100}%`,
-                        height: `${(nativeSize!.h / clipConfig!.crop_h) * 100}%`,
-                        left: `${-(clipConfig!.crop_x / clipConfig!.crop_w) * 100}%`,
-                        top: `${-(clipConfig!.crop_y / clipConfig!.crop_h) * 100}%`,
-                        maxWidth: "none",
-                      }
-                    : {
-                        maxWidth: "100%",
-                        maxHeight: "100%",
-                        transform: previewTransform || undefined,
-                      }
-                }
-                muted
-                autoPlay
-                playsInline
-              />
-            )}
+            {/* 預覽元素 — 統一使用 video (GIF 透過後端 MP4 預覽) */}
+            <video
+              ref={videoRef}
+              src={effectiveVideoSrc}
+              onLoadedMetadata={handleLoadedMetadata}
+              style={
+                hasCrop
+                  ? {
+                      position: "absolute" as const,
+                      width: `${(nativeSize!.w / clipConfig!.crop_w) * 100}%`,
+                      height: `${(nativeSize!.h / clipConfig!.crop_h) * 100}%`,
+                      left: `${-(clipConfig!.crop_x / clipConfig!.crop_w) * 100}%`,
+                      top: `${-(clipConfig!.crop_y / clipConfig!.crop_h) * 100}%`,
+                      maxWidth: "none",
+                    }
+                  : {
+                      maxWidth: "100%",
+                      maxHeight: "100%",
+                      transform: previewTransform || undefined,
+                    }
+              }
+              muted
+              autoPlay
+              playsInline
+            />
           </div>
 
           {/* 影片載入中 spinner overlay */}
