@@ -459,8 +459,8 @@ export function ExportPage({
       {/* ===== 左側 Sidebar ===== */}
       <aside className="w-[30%] min-w-[240px] max-w-[320px] flex flex-col h-screen sticky top-0 sidebar-scroll overflow-y-auto bg-sidebar">
         {/* 頂部: 標題 */}
-        <div className="p-4 pb-2">
-          <img src={logoImg} alt="picgopic!" className="h-8" />
+        <div className="p-4 pb-2 mx-auto mb-6">
+          <img src={logoImg} alt="picgopic!" className="h-16" />
         </div>
 
         {/* 中部: 輸出設定面板 */}

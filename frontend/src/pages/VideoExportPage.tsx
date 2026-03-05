@@ -55,6 +55,9 @@ export function VideoExportPage({
   // ── 編碼強度 ──
   const [encodingPreset, setEncodingPreset] = useState<"fast" | "medium" | "veryslow">("medium");
 
+  // ── 當前啟用的預設 (用於聯動與提示) ──
+  const [activePreset, setActivePreset] = useState<"social" | "compress" | "quality" | null>(null);
+
   // ── 匯出狀態 ──
   const [exporting, setExporting] = useState(false);
   const [progress, setProgress] = useState(0);
@@ -66,6 +69,7 @@ export function VideoExportPage({
 
   const pollRef = useRef<ReturnType<typeof setInterval>>(undefined);
   const videoRef = useRef<HTMLVideoElement>(null);
+  const hasAutoSwitchedUnit = useRef(false);
 
   // ── 預覽區域尺寸測量 ──
   const previewRef = useRef<HTMLDivElement>(null);
@@ -82,6 +86,14 @@ export function VideoExportPage({
   const estimatedSizeKB = videoInfo && videoInfo.duration > 0
     ? Math.round(originalSizeKB * (trimDuration / videoInfo.duration))
     : originalSizeKB;
+
+  // 動態預設值 (KB)
+  const presetSocialKB = estimatedSizeKB > 0
+    ? Math.round(Math.min(estimatedSizeKB * 0.8, 24.5 * 1024))
+    : 0;
+  const presetCompressKB = estimatedSizeKB > 0
+    ? Math.round(estimatedSizeKB * 0.4)
+    : 0;
 
   // 裁切後尺寸
   const cropW = clipConfig?.crop_w ?? videoInfo?.width ?? 0;
@@ -175,6 +187,14 @@ export function VideoExportPage({
     };
   }, [video.file]);
 
+  // ── 根據檔案大小自動選擇初始單位 ──
+  useEffect(() => {
+    if (estimatedSizeKB > 0 && !hasAutoSwitchedUnit.current) {
+      hasAutoSwitchedUnit.current = true;
+      setTargetUnit(estimatedSizeKB < 1024 ? "KB" : "MB");
+    }
+  }, [estimatedSizeKB]);
+
   // ── ObjectURL ──
   useEffect(() => {
     const url = URL.createObjectURL(video.file);
@@ -249,11 +269,21 @@ export function VideoExportPage({
   const commitTarget = useCallback(() => {
     const val = parseFloat(targetInput);
     if (!isNaN(val) && val > 0) {
-      setTargetKB(Math.round(val * unitToKB[targetUnit]));
+      let kb = Math.round(val * unitToKB[targetUnit]);
+      // Sanity check: 不超過估計大小的 1.2 倍
+      if (estimatedSizeKB > 0) {
+        const maxKB = Math.round(estimatedSizeKB * 1.2);
+        if (kb > maxKB) {
+          kb = maxKB;
+          const displayVal = kb / unitToKB[targetUnit];
+          setTargetInput(displayVal >= 10 ? String(Math.round(displayVal)) : displayVal.toFixed(1));
+        }
+      }
+      setTargetKB(kb);
     } else {
       setTargetKB(null);
     }
-  }, [targetInput, targetUnit]);
+  }, [targetInput, targetUnit, estimatedSizeKB]);
 
   const handleTargetKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -262,17 +292,37 @@ export function VideoExportPage({
     [commitTarget],
   );
 
-  // ── 導出預設 ──
-  const applyPreset = useCallback((mb: number | null) => {
-    if (mb === null) {
-      setTargetInput("");
-      setTargetKB(null);
-    } else {
+  // ── 設定目標 KB 並自動選擇最佳單位 ──
+  const setTargetFromKB = useCallback((kb: number) => {
+    const rounded = Math.round(kb);
+    setTargetKB(rounded);
+    if (kb >= 1024 * 1024) {
+      setTargetUnit("GB");
+      setTargetInput((kb / (1024 * 1024)).toFixed(1));
+    } else if (kb >= 1024) {
       setTargetUnit("MB");
-      setTargetInput(String(mb));
-      setTargetKB(mb * 1024);
+      setTargetInput((kb / 1024).toFixed(1));
+    } else {
+      setTargetUnit("KB");
+      setTargetInput(String(rounded));
     }
   }, []);
+
+  // ── 導出預設 (含編碼強度聯動) ──
+  const applyPreset = useCallback((id: "social" | "compress" | "quality") => {
+    setActivePreset(id);
+    if (id === "social") {
+      if (presetSocialKB > 0) setTargetFromKB(presetSocialKB);
+      setEncodingPreset("medium");
+    } else if (id === "compress") {
+      if (presetCompressKB > 0) setTargetFromKB(presetCompressKB);
+      setEncodingPreset("veryslow");
+    } else {
+      setTargetInput("");
+      setTargetKB(null);
+      setEncodingPreset("fast");
+    }
+  }, [presetSocialKB, presetCompressKB, setTargetFromKB]);
 
   // ── 匯出 ──
   const handleExport = useCallback(async () => {
@@ -336,7 +386,7 @@ export function VideoExportPage({
       setError(err instanceof Error ? err.message : "提交任務失敗");
       setExporting(false);
     }
-  }, [videoInfo, video.file, targetKB, clipConfig, rotate, flipH, flipV, includeAudio]);
+  }, [videoInfo, video.file, targetKB, clipConfig, rotate, flipH, flipV, includeAudio, encodingPreset]);
 
   // ── 下載 ──
   const handleDownload = useCallback(async () => {
@@ -373,8 +423,8 @@ export function VideoExportPage({
       {/* ===== 左側設定面板 ===== */}
       <aside className="w-[30%] min-w-[240px] max-w-[320px] flex flex-col h-screen sidebar-scroll overflow-y-auto bg-sidebar">
         {/* Logo */}
-        <div className="p-4 pb-2">
-          <img src={vicLogo} alt="vicgovic!" className="h-8" />
+        <div className="p-4 pb-2 mx-auto mb-6">
+          <img src={vicLogo} alt="picgopic!" className="h-16" />
         </div>
 
         {/* 設定區 */}
@@ -419,26 +469,31 @@ export function VideoExportPage({
               <div className="bg-white/10 rounded-[10px] p-3">
                 <p className="text-xs text-white/70 font-medium mb-2">導出預設</p>
                 <div className="grid grid-cols-3 gap-2">
-                  {([
-                    { label: "社群媒體", mb: 8 },
-                    { label: "極致畫質", mb: null },
-                    { label: "超輕量", mb: 2 },
-                  ] as const).map(({ label, mb }) => (
+                  {[
+                    { id: "social" as const, label: "社群媒體", desc: `≈ ${fmtSize(presetSocialKB)}` },
+                    { id: "compress" as const, label: "極致壓縮", desc: `≈ ${fmtSize(presetCompressKB)}` },
+                    { id: "quality" as const, label: "不壓縮", desc: "原始畫質" },
+                  ].map(({ id, label, desc }) => (
                     <button
-                      key={label}
-                      onClick={() => applyPreset(mb)}
+                      key={id}
+                      onClick={() => applyPreset(id)}
                       disabled={exporting}
                       className={`px-1 py-2 text-[11px] font-medium rounded-lg transition-colors disabled:opacity-40 ${
-                        (mb === null && targetKB === null && targetInput === "")
-                        || (mb !== null && targetKB === mb * 1024)
+                        activePreset === id
                           ? "bg-[#00B4FF] text-white"
                           : "bg-white/5 text-white/60 hover:bg-white/10 border border-white/10"
                       }`}
                     >
-                      {label}
+                      <div>{label}</div>
+                      <div className="text-[9px] opacity-60 mt-0.5">{desc}</div>
                     </button>
                   ))}
                 </div>
+                {activePreset && (
+                  <p className="text-[10px] text-white/40 mt-2">
+                    {{ social: "適合上傳社群平台，兼顧畫質與檔案大小", compress: "正在全力壓縮體積並保留細節，轉檔將耗時較長", quality: "保留原始畫質，快速轉檔不壓縮" }[activePreset]}
+                  </p>
+                )}
               </div>
 
               {/* ── 目標檔案大小 ── */}
@@ -451,7 +506,7 @@ export function VideoExportPage({
                     step={0.1}
                     placeholder={targetUnit}
                     value={targetInput}
-                    onChange={(e) => setTargetInput(e.target.value)}
+                    onChange={(e) => { setTargetInput(e.target.value); setActivePreset(null); }}
                     onBlur={commitTarget}
                     onKeyDown={handleTargetKeyDown}
                     disabled={exporting}
@@ -461,7 +516,7 @@ export function VideoExportPage({
                     {(["KB", "MB", "GB"] as const).map((u) => (
                       <button
                         key={u}
-                        onClick={() => { setTargetUnit(u); setTargetInput(""); setTargetKB(null); }}
+                        onClick={() => { setTargetUnit(u); setTargetInput(""); setTargetKB(null); setActivePreset(null); }}
                         disabled={exporting}
                         className={`px-2 py-1 text-[11px] font-medium transition-colors disabled:opacity-40 ${
                           targetUnit === u
@@ -474,6 +529,39 @@ export function VideoExportPage({
                     ))}
                   </div>
                 </div>
+
+                {/* 比例快捷 */}
+                <div className="flex gap-1.5 mt-2">
+                  {[50, 75, 100].map((pct) => {
+                    const pctKB = estimatedSizeKB > 0 ? Math.round(estimatedSizeKB * pct / 100) : 0;
+                    return (
+                      <button
+                        key={pct}
+                        onClick={() => { setTargetFromKB(pctKB); setActivePreset(null); }}
+                        disabled={exporting || pctKB <= 0}
+                        className={`flex-1 py-1.5 text-[11px] font-medium rounded-md transition-colors disabled:opacity-40 ${
+                          targetKB === pctKB && pctKB > 0
+                            ? "bg-[#00B4FF]/20 text-[#00B4FF] border border-[#00B4FF]/30"
+                            : "bg-white/5 text-white/40 hover:bg-white/10 border border-white/5"
+                        }`}
+                      >
+                        {pct}%
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* 目標大於原片警告 */}
+                {targetKB !== null && estimatedSizeKB > 0 && targetKB > estimatedSizeKB && (
+                  <div className="flex items-start gap-2 mt-2 p-2 bg-yellow-500/10 border border-yellow-500/30 rounded-lg">
+                    <svg className="w-4 h-4 text-yellow-400 shrink-0 mt-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                      <path d="M12 9v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    <span className="text-xs text-yellow-300">
+                      目標體積大於原片，建議調低以節省空間
+                    </span>
+                  </div>
+                )}
 
                 {/* 畫質分級 */}
                 {qualityTier && (
@@ -529,7 +617,7 @@ export function VideoExportPage({
                   ] as const).map(({ key, label }) => (
                     <button
                       key={key}
-                      onClick={() => setEncodingPreset(key)}
+                      onClick={() => { setEncodingPreset(key); setActivePreset(null); }}
                       disabled={exporting}
                       className={`flex-1 py-2 text-xs font-medium transition-colors disabled:opacity-40 ${
                         encodingPreset === key
