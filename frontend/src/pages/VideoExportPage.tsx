@@ -59,6 +59,9 @@ export function VideoExportPage({
   // ── 輸出格式 ──
   const [outputFormat, setOutputFormat] = useState<"mp4" | "gif">("mp4");
 
+  // ── 輸出解析度 ──
+  const [resolution, setResolution] = useState<"original" | "720p" | "480p" | "360p">("original");
+
   // ── 編碼強度 ──
   const [encodingPreset, setEncodingPreset] = useState<"fast" | "medium" | "veryslow">("medium");
 
@@ -106,6 +109,37 @@ export function VideoExportPage({
   const cropW = clipConfig?.crop_w ?? videoInfo?.width ?? 0;
   const cropH = clipConfig?.crop_h ?? videoInfo?.height ?? 0;
 
+  // ── 旋轉判定 ──
+  const isRotated90 = rotate === 90 || rotate === 270;
+
+  // 旋轉後的有效尺寸 (用於解析度計算)
+  const effectiveW = isRotated90 ? cropH : cropW;
+  const effectiveH = isRotated90 ? cropW : cropH;
+
+  // 解析度選項 (僅顯示比原始小的選項)
+  const resolutionOptions = useMemo(() => {
+    const all: { key: "original" | "720p" | "480p" | "360p"; label: string; height: number | null }[] = [
+      { key: "original", label: `原始 (${effectiveH}p)`, height: null },
+      { key: "720p", label: "720p", height: 720 },
+      { key: "480p", label: "480p", height: 480 },
+      { key: "360p", label: "360p", height: 360 },
+    ];
+    return all.filter(r => r.height === null || (effectiveH > r.height));
+  }, [effectiveH]);
+
+  // 計算目標寬度 (傳給後端 target_w)
+  const targetWidth = useMemo(() => {
+    if (resolution === "original" || effectiveH === 0) return undefined;
+    const heightMap = { "720p": 720, "480p": 480, "360p": 360 };
+    const targetH = heightMap[resolution];
+    if (effectiveH <= targetH) return undefined; // 不放大
+    return Math.round(targetH * effectiveW / effectiveH);
+  }, [resolution, effectiveW, effectiveH]);
+
+  // 輸出尺寸 (供顯示)
+  const outputW = targetWidth ?? effectiveW;
+  const outputH = targetWidth ? Math.round(targetWidth * effectiveH / effectiveW) : effectiveH;
+
   // GIF 目標大小上限 (15MB)
   const GIF_MAX_KB = 15 * 1024;
 
@@ -142,9 +176,6 @@ export function VideoExportPage({
     mid: "#00B4FF",
     high: "#34C759",
   };
-
-  // ── 旋轉判定 ──
-  const isRotated90 = rotate === 90 || rotate === 270;
 
   // ── 計算裁切容器尺寸 (依賴 nativeSize，確保 onLoadedMetadata 後才計算) ──
   const cropContainerSize = useMemo(() => {
@@ -361,6 +392,7 @@ export function VideoExportPage({
         rotate,
         flip_h: flipH,
         flip_v: flipV,
+        target_w: targetWidth,
         include_audio: includeAudio,
         quality_preset: encodingPreset,
       });
@@ -402,7 +434,7 @@ export function VideoExportPage({
       setError(err instanceof Error ? err.message : "提交任務失敗");
       setExporting(false);
     }
-  }, [videoInfo, video.file, targetKB, outputFormat, clipConfig, rotate, flipH, flipV, includeAudio, encodingPreset]);
+  }, [videoInfo, video.file, targetKB, outputFormat, targetWidth, clipConfig, rotate, flipH, flipV, includeAudio, encodingPreset]);
 
   // ── 下載 ──
   const handleDownload = useCallback(async () => {
@@ -471,7 +503,11 @@ export function VideoExportPage({
                   </div>
                   <div className="flex justify-between">
                     <span>尺寸</span>
-                    <span className="text-white/80">{cropW} x {cropH}</span>
+                    <span className="text-white/80">
+                      {resolution !== "original"
+                        ? `${outputW} × ${outputH}`
+                        : `${cropW} × ${cropH}`}
+                    </span>
                   </div>
                   <div className="flex justify-between">
                     <span>長度</span>
@@ -499,6 +535,10 @@ export function VideoExportPage({
                       onClick={() => {
                         setOutputFormat(val);
                         setActivePreset(null);
+                        // 切換到 GIF 時，自動降低解析度
+                        if (val === "gif" && (resolution === "original" || resolution === "720p") && effectiveH > 480) {
+                          setResolution("480p");
+                        }
                         // 切換到 GIF 時，若目標大小超過上限則截斷
                         if (val === "gif" && targetKB !== null && targetKB > GIF_MAX_KB) {
                           setTargetKB(GIF_MAX_KB);
@@ -520,6 +560,37 @@ export function VideoExportPage({
                 {outputFormat === "gif" && (
                   <p className="text-[11px] text-yellow-400/80 mt-2">
                     注意：GIF 不支援聲音，且相同畫質下體積會比影片大很多。
+                  </p>
+                )}
+              </div>
+
+              {/* ── 輸出解析度 ── */}
+              <div className="bg-white/10 rounded-[10px] p-3">
+                <p className="text-xs text-white/70 mb-2 font-medium">輸出解析度</p>
+                <div className="flex rounded-lg overflow-hidden border border-white/10">
+                  {resolutionOptions.map(({ key, label }) => (
+                    <button
+                      key={key}
+                      onClick={() => setResolution(key)}
+                      disabled={exporting}
+                      className={`flex-1 py-2 text-xs font-medium transition-colors disabled:opacity-40 ${
+                        resolution === key
+                          ? "bg-[#00B4FF] text-white"
+                          : "bg-white/5 text-white/60 hover:bg-white/10"
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+                {resolution !== "original" && (
+                  <p className="text-[10px] text-white/40 mt-2">
+                    輸出尺寸：{outputW} × {outputH}
+                  </p>
+                )}
+                {outputFormat === "gif" && resolution === "original" && effectiveH > 480 && (
+                  <p className="text-[11px] text-yellow-400/80 mt-2">
+                    降低解析度可顯著減少 GIF 體積
                   </p>
                 )}
               </div>
@@ -557,7 +628,14 @@ export function VideoExportPage({
 
               {/* ── 目標檔案大小 ── */}
               <div className="bg-white/10 rounded-[10px] p-3">
-                <p className="text-xs text-white/70 font-medium mb-3">目標檔案大小</p>
+                <p className="text-xs text-white/70 font-medium mb-3">
+                  {outputFormat === "gif" ? "預期目標（僅供參考）" : "目標檔案大小"}
+                </p>
+                {outputFormat === "gif" && (
+                  <p className="text-[10px] text-white/30 mb-2">
+                    GIF 體積主要由尺寸與幀率決定，若無法達成目標，系統將自動縮小尺寸。
+                  </p>
+                )}
                 <div className="flex items-center gap-2">
                   <input
                     type="number"

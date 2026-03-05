@@ -128,6 +128,64 @@ def calculate_bitrate(
     )
 
 
+def estimate_gif_size_kb(width: int, height: int, fps: int, duration_sec: float) -> float:
+    """
+    估算 GIF 體積 (KB)
+
+    GIF 每像素約 0.3 bytes (256 色 palette + LZW 壓縮)
+    公式：寬 × 高 × FPS × 時長 × 0.3 / 1024
+    """
+    return width * height * fps * duration_sec * 0.3 / 1024
+
+
+def calculate_gif_params(
+    width: int,
+    height: int,
+    duration_sec: float,
+    target_kb: Optional[int],
+) -> dict:
+    """
+    根據目標體積自動計算 GIF 最佳參數 (FPS、寬度)
+
+    降級順序：
+    1. 優先降幀：15 → 10 → 8
+    2. 次要降尺寸：寬度縮至 320px
+    3. 最後手段：寬度縮至 240px
+
+    回傳 dict: fps, width (None=不縮放), warnings
+    """
+    fps_candidates = [15, 10, 8]
+    width_candidates = [None, 320, 240]  # None = 維持原寬
+
+    warnings: list[str] = []
+
+    if target_kb is None:
+        return {"fps": 15, "width": None, "warnings": warnings}
+
+    # 嘗試所有組合，先降幀再降尺寸
+    for try_width in width_candidates:
+        effective_w = try_width if try_width and try_width < width else width
+        effective_h = int(height * effective_w / width) if effective_w != width else height
+        for try_fps in fps_candidates:
+            est = estimate_gif_size_kb(effective_w, effective_h, try_fps, duration_sec)
+            if est <= target_kb:
+                if try_fps < 15:
+                    warnings.append(f"為達成目標體積，FPS 已降至 {try_fps}")
+                if try_width and try_width < width:
+                    warnings.append(f"為達成目標體積，寬度已降至 {effective_w}px")
+                return {
+                    "fps": try_fps,
+                    "width": try_width if try_width and try_width < width else None,
+                    "warnings": warnings,
+                }
+
+    # 所有組合都無法達成目標，使用最小參數並警告
+    min_w = min(w for w in width_candidates if w is not None)
+    min_fps = min(fps_candidates)
+    warnings.append(f"目標體積過小，已使用最低參數 ({min_w}px / {min_fps}fps)，實際體積可能仍超出目標")
+    return {"fps": min_fps, "width": min_w, "warnings": warnings}
+
+
 def _ensure_even(n: int) -> int:
     """確保數值為偶數 (H.264 要求)"""
     return n if n % 2 == 0 else n + 1
@@ -295,11 +353,22 @@ class VideoService:
             bitrate_config: Optional[BitrateConfig] = None
 
             if output_format == "gif":
-                # ── GIF 輸出路徑 ──
+                # ── GIF 輸出路徑 (含自動降級) ──
+                gif_params = calculate_gif_params(width, height, duration, target_kb)
+                gif_fps = gif_params["fps"]
+                gif_resize_w = gif_params["width"]
+                warnings.extend(gif_params["warnings"])
+
+                # 若需要額外縮小尺寸
+                if gif_resize_w is not None:
+                    clip = clip.with_effects([Resize(width=gif_resize_w)])
+                    width = clip.size[0]
+                    height = clip.size[1]
+
                 progress_logger = _ProgressLogger(duration, on_progress)
                 clip.write_gif(
                     tmp_output,
-                    fps=15,
+                    fps=gif_fps,
                     logger=progress_logger.logger,
                 )
                 clip.close()

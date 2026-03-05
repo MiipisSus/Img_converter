@@ -105,6 +105,7 @@ export interface CompressOptions {
   rotate?: number;
   flip_h?: boolean;
   flip_v?: boolean;
+  target_w?: number;
   crop_x?: number;
   crop_y?: number;
   crop_w?: number;
