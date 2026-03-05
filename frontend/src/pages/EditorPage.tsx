@@ -337,25 +337,22 @@ export function EditorPage({
       const visW = effW * M * scale;
       const visH = effH * M * scale;
 
-      const minSide = Math.min(cropW, cropH);
+      // 容器尺寸 = 裁切框的最大可視區域
+      const containerW = imageInfo.containerWidth;
+      const containerH = imageInfo.containerHeight;
+
+      // 可用區域：容器與圖片可視範圍的交集
+      const maxCropW = Math.min(visW, containerW);
+      const maxCropH = Math.min(visH, containerH);
+
+      // 以可用區域為基準，算出符合比例且盡可能大的裁切框
       const ratio = ratioW / ratioH;
-      let newW: number, newH: number;
+      let newW = maxCropW;
+      let newH = maxCropW / ratio;
 
-      if (ratio >= 1) {
-        newW = minSide * ratio;
-        newH = minSide;
-      } else {
-        newW = minSide;
-        newH = minSide / ratio;
-      }
-
-      if (newW > visW) {
-        newH = newH * (visW / newW);
-        newW = visW;
-      }
-      if (newH > visH) {
-        newW = newW * (visH / newH);
-        newH = visH;
+      if (newH > maxCropH) {
+        newH = maxCropH;
+        newW = maxCropH * ratio;
       }
 
       const oldCenterX = cropX + cropW / 2;
@@ -363,8 +360,7 @@ export function EditorPage({
       let newX = oldCenterX - newW / 2;
       let newY = oldCenterY - newH / 2;
 
-      const containerW = imageInfo.containerWidth;
-      const containerH = imageInfo.containerHeight;
+      // 圖片在容器中的邊界
       const imgLeft =
         (containerW - visW) / 2 + editorState.imageX;
       const imgTop =
@@ -372,10 +368,16 @@ export function EditorPage({
       const imgRight = imgLeft + visW;
       const imgBottom = imgTop + visH;
 
-      if (newX < imgLeft) newX = imgLeft;
-      if (newY < imgTop) newY = imgTop;
-      if (newX + newW > imgRight) newX = imgRight - newW;
-      if (newY + newH > imgBottom) newY = imgBottom - newH;
+      // 同時約束在圖片與容器邊界內
+      const boundsLeft = Math.max(imgLeft, 0);
+      const boundsTop = Math.max(imgTop, 0);
+      const boundsRight = Math.min(imgRight, containerW);
+      const boundsBottom = Math.min(imgBottom, containerH);
+
+      if (newX < boundsLeft) newX = boundsLeft;
+      if (newY < boundsTop) newY = boundsTop;
+      if (newX + newW > boundsRight) newX = boundsRight - newW;
+      if (newY + newH > boundsBottom) newY = boundsBottom - newH;
 
       editorControlRef.current.setCropBox(
         { cropX: newX, cropY: newY, cropW: newW, cropH: newH },
