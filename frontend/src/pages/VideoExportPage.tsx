@@ -70,6 +70,9 @@ export function VideoExportPage({
   // ── 當前啟用的預設 (用於聯動與提示) ──
   const [activePreset, setActivePreset] = useState<"social" | "compress" | "quality" | null>(null);
 
+  // ── 解析度切換提示 ──
+  const [resolutionHint, setResolutionHint] = useState("");
+
   // ── 匯出狀態 ──
   const [exporting, setExporting] = useState(false);
   const [progress, setProgress] = useState(0);
@@ -99,14 +102,6 @@ export function VideoExportPage({
     ? Math.round(originalSizeKB * (trimDuration / videoInfo.duration))
     : originalSizeKB;
 
-  // 動態預設值 (KB)
-  const presetSocialKB = estimatedSizeKB > 0
-    ? Math.round(Math.min(estimatedSizeKB * 0.8, 24.5 * 1024))
-    : 0;
-  const presetCompressKB = estimatedSizeKB > 0
-    ? Math.round(estimatedSizeKB * 0.4)
-    : 0;
-
   // 裁切後尺寸
   const cropW = clipConfig?.crop_w ?? videoInfo?.width ?? 0;
   const cropH = clipConfig?.crop_h ?? videoInfo?.height ?? 0;
@@ -117,6 +112,24 @@ export function VideoExportPage({
   // 旋轉後的有效尺寸 (用於解析度計算)
   const effectiveW = isRotated90 ? cropH : cropW;
   const effectiveH = isRotated90 ? cropW : cropH;
+
+  // 解析度面積係數 (低解析度 → 預設值自動縮小)
+  const resolutionCoeff = useMemo(() => {
+    if (resolution === "original") return 1.0;
+    const heightMap: Record<string, number> = { "720p": 720, "480p": 480, "360p": 360 };
+    const targetH = heightMap[resolution];
+    if (!targetH || effectiveH <= 0) return 1.0;
+    const ratio = targetH / effectiveH;
+    return Math.min(ratio * ratio, 1.0); // 面積比例
+  }, [resolution, effectiveH]);
+
+  // 動態預設值 (KB) — 乘以解析度係數
+  const presetSocialKB = estimatedSizeKB > 0
+    ? Math.round(Math.min(estimatedSizeKB * 0.8 * resolutionCoeff, 24.5 * 1024))
+    : 0;
+  const presetCompressKB = estimatedSizeKB > 0
+    ? Math.round(estimatedSizeKB * 0.4 * resolutionCoeff)
+    : 0;
 
   // 解析度選項 (僅顯示比原始小的選項)
   const resolutionOptions = useMemo(() => {
@@ -206,15 +219,23 @@ export function VideoExportPage({
       fitW = areaH * visualAspect;
     }
 
+    // 解析度縮放
+    const rScale = resolution === "original" ? 1.0 : (outputH / effectiveH);
+    fitW *= rScale;
+    fitH *= rScale;
+
     // 容器使用旋轉前的座標，CSS transform 負責旋轉
     return {
       w: isRotated90 ? fitH : fitW,
       h: isRotated90 ? fitW : fitH,
     };
-  }, [clipConfig, previewSize, isRotated90, nativeSize]);
+  }, [clipConfig, previewSize, isRotated90, nativeSize, resolution, outputH, effectiveH]);
 
   // ── 是否啟用裁切預覽 ──
   const hasCrop = !!(clipConfig && nativeSize && cropContainerSize);
+
+  // ── 解析度預覽縮放比 ──
+  const resolutionScale = resolution === "original" ? 1.0 : (outputH / effectiveH);
 
   // ── GIF 預覽 MP4 優先 ──
   const effectiveVideoSrc = (isGifSource && gifPreviewUrl) ? gifPreviewUrl : videoUrl;
@@ -245,6 +266,19 @@ export function VideoExportPage({
       setTargetUnit(estimatedSizeKB < 1024 ? "KB" : "MB");
     }
   }, [estimatedSizeKB]);
+
+  // ── 解析度切換時，自動更新已啟用的預設目標大小 ──
+  useEffect(() => {
+    if (!activePreset || activePreset === "quality") return;
+    if (activePreset === "social" && presetSocialKB > 0) setTargetFromKB(presetSocialKB);
+    if (activePreset === "compress" && presetCompressKB > 0) setTargetFromKB(presetCompressKB);
+    if (resolution !== "original") {
+      setResolutionHint("已根據解析度自動調整建議大小");
+      const t = setTimeout(() => setResolutionHint(""), 3000);
+      return () => clearTimeout(t);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resolution]);
 
   // ── ObjectURL ──
   useEffect(() => {
@@ -674,6 +708,11 @@ export function VideoExportPage({
                   </div>
                 </div>
 
+                {/* 解析度調整提示 */}
+                {resolutionHint && (
+                  <p className="text-[11px] text-[#00B4FF] mt-1.5 transition-opacity">{resolutionHint}</p>
+                )}
+
                 {/* 比例快捷 */}
                 <div className="flex gap-1.5 mt-2">
                   {[50, 75, 100].map((pct) => {
@@ -860,6 +899,7 @@ export function VideoExportPage({
                     height: cropContainerSize!.h,
                     flexShrink: 0,
                     transform: previewTransform || undefined,
+                    transition: "width 0.3s ease, height 0.3s ease",
                   }
                 : { display: "contents" as const }
             }
@@ -882,7 +922,8 @@ export function VideoExportPage({
                   : {
                       maxWidth: "100%",
                       maxHeight: "100%",
-                      transform: previewTransform || undefined,
+                      transform: [previewTransform, resolutionScale < 1 ? `scale(${resolutionScale})` : ""].filter(Boolean).join(" ") || undefined,
+                      transition: "transform 0.3s ease",
                     }
               }
               muted
@@ -890,6 +931,15 @@ export function VideoExportPage({
               playsInline
             />
           </div>
+
+          {/* 解析度標籤 */}
+          {resolution !== "original" && (
+            <span
+              className="absolute bottom-3 right-3 px-2 py-0.5 text-[11px] font-bold text-white/90 bg-black/50 backdrop-blur-sm rounded-md transition-opacity duration-300"
+            >
+              {resolution}
+            </span>
+          )}
 
           {/* 影片載入中 spinner overlay */}
           {!nativeSize && (

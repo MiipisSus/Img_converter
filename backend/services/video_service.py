@@ -147,43 +147,49 @@ def calculate_gif_params(
     """
     根據目標體積自動計算 GIF 最佳參數 (FPS、寬度)
 
-    降級順序：
-    1. 優先降幀：15 → 10 → 8
-    2. 次要降尺寸：寬度縮至 320px
-    3. 最後手段：寬度縮至 240px
+    迭代式降維：
+    1. 初始 fps=15, scale=1.0
+    2. 若估算體積 > target_kb：
+       - 先降 fps (15→12→10→8)
+       - fps 已最低則 scale *= 0.8 (每次縮 20%)
+       - 直到 ≤ target_kb 或 scale < 0.3
 
-    回傳 dict: fps, width (None=不縮放), warnings
+    回傳 dict: fps, width (int or None=不縮放), warnings
     """
-    fps_candidates = [15, 10, 8]
-    width_candidates = [None, 320, 240]  # None = 維持原寬
-
     warnings: list[str] = []
 
     if target_kb is None:
         return {"fps": 15, "width": None, "warnings": warnings}
 
-    # 嘗試所有組合，先降幀再降尺寸
-    for try_width in width_candidates:
-        effective_w = try_width if try_width and try_width < width else width
-        effective_h = int(height * effective_w / width) if effective_w != width else height
-        for try_fps in fps_candidates:
-            est = estimate_gif_size_kb(effective_w, effective_h, try_fps, duration_sec)
+    fps_steps = [15, 12, 10, 8]
+    scale = 1.0
+    min_scale = 0.3
+
+    while scale >= min_scale:
+        cur_w = max(int(width * scale), 1)
+        cur_h = max(int(height * scale), 1)
+
+        for fps in fps_steps:
+            est = estimate_gif_size_kb(cur_w, cur_h, fps, duration_sec)
             if est <= target_kb:
-                if try_fps < 15:
-                    warnings.append(f"為達成目標體積，FPS 已降至 {try_fps}")
-                if try_width and try_width < width:
-                    warnings.append(f"為達成目標體積，寬度已降至 {effective_w}px")
+                if fps < 15:
+                    warnings.append(f"為達成目標體積，FPS 已降至 {fps}")
+                if scale < 1.0:
+                    warnings.append(f"為達成目標體積，寬度已降至 {cur_w}px")
                 return {
-                    "fps": try_fps,
-                    "width": try_width if try_width and try_width < width else None,
+                    "fps": fps,
+                    "width": cur_w if scale < 1.0 else None,
                     "warnings": warnings,
                 }
 
-    # 所有組合都無法達成目標，使用最小參數並警告
-    min_w = min(w for w in width_candidates if w is not None)
-    min_fps = min(fps_candidates)
-    warnings.append(f"目標體積過小，已使用最低參數 ({min_w}px / {min_fps}fps)，實際體積可能仍超出目標")
-    return {"fps": min_fps, "width": min_w, "warnings": warnings}
+        # 所有 fps 都不夠，縮小尺寸再試
+        scale *= 0.8
+
+    # 迭代結束仍無法達成目標
+    final_w = max(int(width * min_scale), 1)
+    min_fps = fps_steps[-1]
+    warnings.append(f"目標體積過小，已使用最低參數 ({final_w}px / {min_fps}fps)，實際體積可能仍超出目標")
+    return {"fps": min_fps, "width": final_w, "warnings": warnings}
 
 
 def _ensure_even(n: int) -> int:
@@ -399,6 +405,9 @@ class VideoService:
                     logger=progress_logger.logger,
                 )
                 clip.close()
+
+                # gifsicle 有損壓縮後處理
+                self._optimize_gif_with_gifsicle(tmp_output)
             else:
                 # ── 影片輸出路徑 (mp4/webm) ──
                 ffmpeg_params = ["-preset", quality_preset]
@@ -536,6 +545,29 @@ class VideoService:
             os.unlink(tmp_path)
 
     # ── 私有方法 ──
+
+    @staticmethod
+    def _optimize_gif_with_gifsicle(gif_path: str) -> None:
+        """gifsicle 有損壓縮後處理 (--lossy=80 -O3)，可減少 40-60% 體積"""
+        import subprocess
+        import shutil
+        import logging
+
+        if not shutil.which("gifsicle"):
+            logging.warning("gifsicle 未安裝，跳過 GIF 後處理優化")
+            return
+
+        try:
+            subprocess.run(
+                ["gifsicle", "--lossy=80", "-O3", "--batch", gif_path],
+                check=True,
+                capture_output=True,
+                timeout=60,
+            )
+        except subprocess.CalledProcessError as e:
+            logging.warning(f"gifsicle 優化失敗: {e.stderr.decode(errors='replace')}")
+        except subprocess.TimeoutExpired:
+            logging.warning("gifsicle 優化超時 (60s)")
 
     def _second_pass(
         self,
