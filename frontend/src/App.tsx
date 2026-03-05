@@ -89,6 +89,23 @@ function App() {
     setActiveImageId(id);
   }, []);
 
+  const handleRemoveImage = useCallback((id: string) => {
+    setImages((prev) => {
+      const next = prev.filter((img) => img.id !== id);
+      // 若移除的是當前選中的圖片，自動選下一張或清空
+      if (id === activeImageId) {
+        if (next.length > 0) {
+          const idx = prev.findIndex((img) => img.id === id);
+          const newIdx = Math.min(idx, next.length - 1);
+          setActiveImageId(next[newIdx].id);
+        } else {
+          setActiveImageId("");
+        }
+      }
+      return next;
+    });
+  }, [activeImageId]);
+
   const handleExport = useCallback(() => {
     setCurrentStep("export");
   }, []);
@@ -169,6 +186,7 @@ function App() {
         images={images}
         activeImageId={activeImageId}
         onSelectImage={handleSelectImage}
+        onRemoveImage={handleRemoveImage}
         onUpdateImage={handleUpdateImage}
         onAppendImages={handleAppendImages}
         imageRef={imageRef}

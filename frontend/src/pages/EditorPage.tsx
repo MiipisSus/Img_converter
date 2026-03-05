@@ -22,6 +22,7 @@ interface EditorPageProps {
   images: ImageItem[];
   activeImageId: string;
   onSelectImage: (id: string) => void;
+  onRemoveImage: (id: string) => void;
   onUpdateImage: (id: string, updates: Partial<ImageItem>) => void;
   onAppendImages: (newImages: ImageItem[]) => void;
   imageRef: React.MutableRefObject<HTMLImageElement | null>;
@@ -36,6 +37,7 @@ export function EditorPage({
   images,
   activeImageId,
   onSelectImage,
+  onRemoveImage,
   onUpdateImage,
   onAppendImages,
   imageRef,
@@ -874,11 +876,15 @@ export function EditorPage({
             className="hidden"
           />
 
+          {images.length === 0 && (
+            <span className="text-sm text-white/40">請點擊上傳新圖片</span>
+          )}
+
           {images.map((item) => (
             <button
               key={item.id}
               onClick={() => onSelectImage(item.id)}
-              className={`shrink-0 w-16 h-16 rounded-lg overflow-hidden border-2 transition-colors ${
+              className={`group relative shrink-0 w-16 h-16 rounded-lg overflow-hidden border-2 transition-colors ${
                 item.id === activeImageId
                   ? "border-highlight"
                   : "border-transparent hover:border-white/30"
@@ -889,6 +895,12 @@ export function EditorPage({
                 className="w-full h-full object-cover"
                 alt=""
               />
+              <button
+                onClick={(e) => { e.stopPropagation(); onRemoveImage(item.id); }}
+                className="absolute top-0 right-0 w-5 h-5 flex items-center justify-center bg-black/70 text-white/80 hover:text-white text-xs rounded-bl-md opacity-0 group-hover:opacity-100 transition-opacity"
+              >
+                &times;
+              </button>
             </button>
           ))}
         </div>
