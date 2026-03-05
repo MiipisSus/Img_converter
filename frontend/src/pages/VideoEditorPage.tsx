@@ -5,6 +5,7 @@ import { getVideoInfo } from "../api/videoApi";
 import type { VideoInfoResult } from "../api/videoApi";
 import { useVideoTransform } from "../hooks/useVideoTransform";
 import { generateFilmstrip } from "../utils/filmstrip";
+import { generateGifFilmstrip, createGifSeeker, type GifSeeker } from "../utils/gifDecoder";
 import { reconstructTransformFromCrop, getFinalVideoCropArea } from "../utils/videoCropMath";
 import { TrimSlider } from "../components/TrimSlider";
 import { CropOverlay } from "../components/CropOverlay";
@@ -95,6 +96,11 @@ export function VideoEditorPage({ video, onExport, onReset, initialState }: Vide
   // ── 瀏覽器實際解碼的影片解析度 (video.videoWidth/Height) ──
   const [intrinsicVideoSize, setIntrinsicVideoSize] = useState<{ w: number; h: number } | null>(null);
 
+  // ── GIF 幀搜尋 ──
+  const gifSeekerRef = useRef<GifSeeker | null>(null);
+  const gifCanvasRef = useRef<HTMLCanvasElement>(null);
+  const [isGifSeeking, setIsGifSeeking] = useState(false);
+
   // ── Refs ──
   const videoRef = useRef<HTMLVideoElement>(null);
   const videoUrlRef = useRef<string>("");
@@ -171,7 +177,10 @@ export function VideoEditorPage({ video, onExport, onReset, initialState }: Vide
     }
     let cancelled = false;
     setFilmstrip([]);
-    generateFilmstrip(video.file, 12).then((frames) => {
+    const generate = isGifSource
+      ? generateGifFilmstrip(video.file, 12)
+      : generateFilmstrip(video.file, 12);
+    generate.then((frames) => {
       if (cancelled) return;
       filmstripCacheRef.current = { fileId: video.id, frames };
       setFilmstrip(frames);
@@ -179,7 +188,24 @@ export function VideoEditorPage({ video, onExport, onReset, initialState }: Vide
       if (!cancelled) console.error("膠捲產生失敗:", err);
     });
     return () => { cancelled = true; };
-  }, [video.id, video.file]);
+  }, [video.id, video.file, isGifSource]);
+
+  // ── GIF 幀搜尋器生命週期 (進入 clip 模式時建立) ──
+  useEffect(() => {
+    if (!isGifSource || mode !== "clip") return;
+    let cancelled = false;
+
+    createGifSeeker(video.file).then((seeker) => {
+      if (cancelled) { seeker?.close(); return; }
+      gifSeekerRef.current = seeker;
+    });
+
+    return () => {
+      cancelled = true;
+      gifSeekerRef.current?.close();
+      gifSeekerRef.current = null;
+    };
+  }, [isGifSource, mode, video.file]);
 
   // ── 追蹤預覽區域尺寸 (ResizeObserver) ──
   useEffect(() => {
@@ -456,10 +482,19 @@ export function VideoEditorPage({ video, onExport, onReset, initialState }: Vide
     }
   }, [isPlaying, startT, endT]);
 
+  // ── GIF 幀搜尋 ──
+  const seekGifFrame = useCallback(async (timeSec: number) => {
+    const seeker = gifSeekerRef.current;
+    const canvas = gifCanvasRef.current;
+    if (!seeker || !canvas || !duration) return;
+    await seeker.seekTo(timeSec, duration, canvas);
+  }, [duration]);
+
   // ── 滑桿回調 ──
   const handleStartChange = useCallback(
     (v: number) => {
       setStartT(v);
+      if (isGifSource) { seekGifFrame(v); return; }
       const el = videoRef.current;
       if (el) {
         if (!el.paused) el.pause();
@@ -467,12 +502,13 @@ export function VideoEditorPage({ video, onExport, onReset, initialState }: Vide
         setCurrentTime(v);
       }
     },
-    [],
+    [isGifSource, seekGifFrame],
   );
 
   const handleEndChange = useCallback(
     (v: number) => {
       setEndT(v);
+      if (isGifSource) { seekGifFrame(v); return; }
       const el = videoRef.current;
       if (el) {
         if (!el.paused) el.pause();
@@ -480,28 +516,37 @@ export function VideoEditorPage({ video, onExport, onReset, initialState }: Vide
         setCurrentTime(v);
       }
     },
-    [],
+    [isGifSource, seekGifFrame],
   );
 
   const handleSeek = useCallback((v: number) => {
+    if (isGifSource) { seekGifFrame(v); return; }
     const el = videoRef.current;
     if (el) {
       el.currentTime = v;
       setCurrentTime(v);
     }
-  }, []);
+  }, [isGifSource, seekGifFrame]);
 
   // ── 滑桿拖曳開始/結束 ──
   const wasPlayingBeforeDragRef = useRef(false);
 
   const handleTrimDragStart = useCallback(() => {
     isTrimDraggingRef.current = true;
-    const el = videoRef.current;
-    wasPlayingBeforeDragRef.current = !!el && !el.paused;
-  }, []);
+    if (isGifSource) {
+      setIsGifSeeking(true);
+    } else {
+      const el = videoRef.current;
+      wasPlayingBeforeDragRef.current = !!el && !el.paused;
+    }
+  }, [isGifSource]);
 
   const handleTrimDragEnd = useCallback((target: "start" | "end" | "seek") => {
     isTrimDraggingRef.current = false;
+    if (isGifSource) {
+      setIsGifSeeking(false);
+      return;
+    }
     const el = videoRef.current;
     if (!el) return;
     if (wasPlayingBeforeDragRef.current) {
@@ -512,7 +557,7 @@ export function VideoEditorPage({ video, onExport, onReset, initialState }: Vide
       }
       el.play();
     }
-  }, []);
+  }, [isGifSource]);
 
   // ─────────────────────────────────────────────
   // 裁切交互
@@ -973,19 +1018,39 @@ export function VideoEditorPage({ video, onExport, onReset, initialState }: Vide
                   {/* 影片層 — 播放中裁切效果持續生效 */}
                   <div className="absolute inset-0 flex items-center justify-center">
                     {isGifSource ? (
-                      <img
-                        src={videoUrlRef.current}
-                        className="max-w-none pointer-events-none"
-                        style={{
-                          width: effectiveVideoW * transform.displayMultiplier,
-                          height: effectiveVideoH * transform.displayMultiplier,
-                          transform: transform.videoTransform,
-                          transformOrigin: "center center",
-                          transition: isSnappingBack ? "transform 200ms ease-out" : "none",
-                          willChange: "transform",
-                        }}
-                        draggable={false}
-                      />
+                      <>
+                        {/* GIF 自動動畫 (拖曳時隱藏) */}
+                        <img
+                          src={videoUrlRef.current}
+                          className="max-w-none pointer-events-none"
+                          style={{
+                            width: effectiveVideoW * transform.displayMultiplier,
+                            height: effectiveVideoH * transform.displayMultiplier,
+                            transform: transform.videoTransform,
+                            transformOrigin: "center center",
+                            transition: isSnappingBack ? "transform 200ms ease-out" : "none",
+                            willChange: "transform",
+                            display: isGifSeeking ? "none" : undefined,
+                          }}
+                          draggable={false}
+                        />
+                        {/* GIF 幀預覽 canvas (拖曳時顯示) */}
+                        <canvas
+                          ref={gifCanvasRef}
+                          width={effectiveVideoW}
+                          height={effectiveVideoH}
+                          className="max-w-none pointer-events-none"
+                          style={{
+                            width: effectiveVideoW * transform.displayMultiplier,
+                            height: effectiveVideoH * transform.displayMultiplier,
+                            transform: transform.videoTransform,
+                            transformOrigin: "center center",
+                            transition: isSnappingBack ? "transform 200ms ease-out" : "none",
+                            willChange: "transform",
+                            display: isGifSeeking ? undefined : "none",
+                          }}
+                        />
+                      </>
                     ) : (
                       <video
                         ref={videoRef}
