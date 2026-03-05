@@ -9,6 +9,7 @@ import { reconstructTransformFromCrop, getFinalVideoCropArea } from "../utils/vi
 import { TrimSlider } from "../components/TrimSlider";
 import { CropOverlay } from "../components/CropOverlay";
 import vicLogo from "../assets/vic_logo.png";
+import { ConfirmModal } from "../components/ConfirmModal";
 
 interface VideoEditorPageProps {
   video: VideoItem;
@@ -38,6 +39,7 @@ export function VideoEditorPage({ video, onExport, onReset, initialState }: Vide
   // ── 影片資訊 ──
   const [videoInfo, setVideoInfo] = useState<VideoInfoResult | null>(null);
   const [loading, setLoading] = useState(true);
+  const [showResetModal, setShowResetModal] = useState(false);
 
   // ── 編輯模式 ──
   const [mode, setMode] = useState<EditorMode>("default");
@@ -657,7 +659,9 @@ export function VideoEditorPage({ video, onExport, onReset, initialState }: Vide
       <aside className="w-[30%] min-w-[240px] max-w-[320px] flex flex-col h-screen sidebar-scroll overflow-y-auto bg-sidebar">
         {/* Logo */}
         <div className="p-4 pb-2 mx-auto mb-6">
-          <img src={vicLogo} alt="VicgoVic!" className="h-16" />
+          <button onClick={() => setShowResetModal(true)} className="cursor-pointer">
+            <img src={vicLogo} alt="VicgoVic!" className="h-16" />
+          </button>
         </div>
 
         {/* 控制面板 */}
@@ -931,7 +935,7 @@ export function VideoEditorPage({ video, onExport, onReset, initialState }: Vide
           )}
           {mode === "default" && (
             <button
-              onClick={onReset}
+              onClick={() => setShowResetModal(true)}
               className="w-full px-4 py-2 text-white/70 hover:text-white text-md transition-colors"
             >
               返回
@@ -1090,6 +1094,16 @@ export function VideoEditorPage({ video, onExport, onReset, initialState }: Vide
           </div>
         )}
       </main>
+
+      <ConfirmModal
+        open={showResetModal}
+        title="返回首頁"
+        message="確定要放棄目前的編輯內容並返回首頁嗎？"
+        confirmLabel="返回首頁"
+        cancelLabel="繼續編輯"
+        onConfirm={onReset}
+        onCancel={() => setShowResetModal(false)}
+      />
     </div>
   );
 }

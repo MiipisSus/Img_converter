@@ -147,6 +147,7 @@ function App() {
           video={video}
           exportState={videoExportState}
           onReturn={handleVideoReturnToEdit}
+          onReset={handleReset}
         />
       );
     }
@@ -187,6 +188,7 @@ function App() {
         onSelectImage={handleSelectImage}
         setImages={setImages}
         onReturn={handleReturnToEdit}
+        onReset={handleReset}
       />
     );
   }

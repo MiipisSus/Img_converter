@@ -14,6 +14,7 @@ import type { EditorState, ImageInfo } from "../hooks/useImageEditor";
 import type { PipelineState, ImageItem } from "../types";
 import { loadImageFile } from "../utils/loadImageFile";
 import logoImg from "../assets/pic_logo.png";
+import { ConfirmModal } from "../components/ConfirmModal";
 
 type EditorMode = "preview" | "crop";
 
@@ -44,6 +45,7 @@ export function EditorPage({
 }: EditorPageProps) {
   const [mode, setMode] = useState<EditorMode>("preview");
   const [isExporting, setIsExporting] = useState(false);
+  const [showResetModal, setShowResetModal] = useState(false);
 
   // ── 追加圖片 ──
   const appendInputRef = useRef<HTMLInputElement>(null);
@@ -751,7 +753,9 @@ export function EditorPage({
       <aside className="w-[30%] min-w-[240px] max-w-[320px] flex flex-col h-screen sticky top-0 sidebar-scroll overflow-y-auto bg-sidebar">
         {/* 頂部: 標題 */}
         <div className="p-4 pb-2 mx-auto mb-6">
-          <img src={logoImg} alt="picgopic!" className="h-16" />
+          <button onClick={() => setShowResetModal(true)} className="cursor-pointer">
+            <img src={logoImg} alt="picgopic!" className="h-16" />
+          </button>
         </div>
 
         {/* 中部: 模式面板 */}
@@ -801,7 +805,7 @@ export function EditorPage({
           )}
           {mode === "preview" && (
             <button
-              onClick={onReset}
+              onClick={() => setShowResetModal(true)}
               className="w-full px-4 py-2 text-white/70 hover:text-white text-md transition-colors"
             >
               返回
@@ -887,6 +891,17 @@ export function EditorPage({
           ))}
         </div>
       </main>
+
+      <ConfirmModal
+        open={showResetModal}
+        title="返回首頁"
+        message="確定要放棄目前的編輯內容並返回首頁嗎？"
+        confirmLabel="返回首頁"
+        cancelLabel="繼續編輯"
+        onConfirm={onReset}
+        onCancel={() => setShowResetModal(false)}
+        accent="#d4ff3f"
+      />
     </div>
   );
 }

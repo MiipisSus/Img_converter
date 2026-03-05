@@ -5,6 +5,7 @@ import { generateCroppedImage } from "../utils/generateCroppedImage";
 import { getCroppedOriginalSize } from "../utils/containerParams";
 import type { OutputSettings, ImageItem, ExportFormat } from "../types";
 import logoImg from "../assets/pic_logo.png";
+import { ConfirmModal } from "../components/ConfirmModal";
 
 interface ExportPageProps {
   images: ImageItem[];
@@ -12,6 +13,7 @@ interface ExportPageProps {
   onSelectImage: (id: string) => void;
   setImages: React.Dispatch<React.SetStateAction<ImageItem[]>>;
   onReturn: () => void;
+  onReset: () => void;
 }
 
 export function ExportPage({
@@ -20,8 +22,10 @@ export function ExportPage({
   onSelectImage,
   setImages,
   onReturn,
+  onReset,
 }: ExportPageProps) {
   const [unifiedOutput, setUnifiedOutput] = useState(false);
+  const [showResetModal, setShowResetModal] = useState(false);
   const unifiedOutputRef = useRef(unifiedOutput);
   unifiedOutputRef.current = unifiedOutput;
 
@@ -460,7 +464,9 @@ export function ExportPage({
       <aside className="w-[30%] min-w-[240px] max-w-[320px] flex flex-col h-screen sticky top-0 sidebar-scroll overflow-y-auto bg-sidebar">
         {/* 頂部: 標題 */}
         <div className="p-4 pb-2 mx-auto mb-6">
-          <img src={logoImg} alt="picgopic!" className="h-16" />
+          <button onClick={() => setShowResetModal(true)} className="cursor-pointer">
+            <img src={logoImg} alt="picgopic!" className="h-16" />
+          </button>
         </div>
 
         {/* 中部: 輸出設定面板 */}
@@ -585,6 +591,17 @@ export function ExportPage({
           </div>
         )}
       </main>
+
+      <ConfirmModal
+        open={showResetModal}
+        title="返回首頁"
+        message="確定要放棄目前的編輯內容並返回首頁嗎？"
+        confirmLabel="返回首頁"
+        cancelLabel="繼續編輯"
+        onConfirm={onReset}
+        onCancel={() => setShowResetModal(false)}
+        accent="#FFD60A"
+      />
     </div>
   );
 }

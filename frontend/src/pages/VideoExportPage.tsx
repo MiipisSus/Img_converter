@@ -10,11 +10,13 @@ import {
 } from "../api/videoApi";
 import type { VideoInfoResult, TaskStatusResult } from "../api/videoApi";
 import vicLogo from "../assets/vic_logo.png";
+import { ConfirmModal } from "../components/ConfirmModal";
 
 interface VideoExportPageProps {
   video: VideoItem;
   exportState: VideoExportState;
   onReturn: () => void;
+  onReset: () => void;
 }
 
 /** 秒數格式化為 mm:ss */
@@ -34,6 +36,7 @@ export function VideoExportPage({
   video,
   exportState,
   onReturn,
+  onReset,
 }: VideoExportPageProps) {
   const { clipConfig, rotate, flipH, flipV } = exportState;
 
@@ -46,6 +49,7 @@ export function VideoExportPage({
 
   // ── 影片 URL ──
   const [videoUrl, setVideoUrl] = useState("");
+  const [showResetModal, setShowResetModal] = useState(false);
 
   // ── 目標大小 ──
   const [targetInput, setTargetInput] = useState("");
@@ -424,7 +428,9 @@ export function VideoExportPage({
       <aside className="w-[30%] min-w-[240px] max-w-[320px] flex flex-col h-screen sidebar-scroll overflow-y-auto bg-sidebar">
         {/* Logo */}
         <div className="p-4 pb-2 mx-auto mb-6">
-          <img src={vicLogo} alt="picgopic!" className="h-16" />
+          <button onClick={() => setShowResetModal(true)} className="cursor-pointer">
+            <img src={vicLogo} alt="VicgoVic!" className="h-16" />
+          </button>
         </div>
 
         {/* 設定區 */}
@@ -788,6 +794,16 @@ export function VideoExportPage({
           </div>
         )}
       </main>
+
+      <ConfirmModal
+        open={showResetModal}
+        title="返回首頁"
+        message="確定要放棄目前的編輯內容並返回首頁嗎？"
+        confirmLabel="返回首頁"
+        cancelLabel="繼續編輯"
+        onConfirm={onReset}
+        onCancel={() => setShowResetModal(false)}
+      />
     </div>
   );
 }
