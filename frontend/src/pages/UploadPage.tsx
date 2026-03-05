@@ -3,6 +3,7 @@ import type { ImageItem, VideoItem } from "../types";
 import { loadImageFile } from "../utils/loadImageFile";
 import picLogo from "../assets/pic_logo.png";
 import vicLogo from "../assets/vic_logo.png";
+import bmcLogo from "../assets/bmc-full-logo.png";
 
 interface UploadPageProps {
   onImagesLoaded: (images: ImageItem[]) => void;
@@ -259,6 +260,24 @@ export function UploadPage({ onImagesLoaded, onVideoLoaded }: UploadPageProps) {
           className="hidden"
         />
       </div>
+      {/* Buy Me a Coffee */}
+      <a
+        href="https://www.buymeacoffee.com/miipissus"
+        target="_blank"
+        rel="noopener noreferrer"
+        className="fixed left-4 bottom-4 z-40 px-4 py-2 rounded-lg hover:scale-105 transition-transform"
+        style={{
+          animation: "bmc-color 10s ease-in-out infinite",
+        }}
+      >
+        <img src={bmcLogo} alt="Buy Me A Coffee" className="h-7" />
+        <style>{`
+          @keyframes bmc-color {
+            0%, 100% { background-color: #D4FF3F; }
+            50% { background-color: #00B4FF; }
+          }
+        `}</style>
+      </a>
     </div>
   );
 }
