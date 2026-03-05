@@ -36,6 +36,9 @@ type EditorMode = "default" | "clip";
 type CropResizeHandle = "nw" | "ne" | "sw" | "se" | "n" | "s" | "e" | "w";
 
 export function VideoEditorPage({ video, onExport, onReset, initialState }: VideoEditorPageProps) {
+  // ── GIF 來源偵測 ──
+  const isGifSource = video.file.type === "image/gif";
+
   // ── 影片資訊 ──
   const [videoInfo, setVideoInfo] = useState<VideoInfoResult | null>(null);
   const [loading, setLoading] = useState(true);
@@ -64,7 +67,7 @@ export function VideoEditorPage({ video, onExport, onReset, initialState }: Vide
   const isTrimDraggingRef = useRef(false);
 
   // ── 音訊開關 ──
-  const [includeAudio, setIncludeAudio] = useState(initialState?.clipConfig?.include_audio ?? true);
+  const [includeAudio, setIncludeAudio] = useState(isGifSource ? false : (initialState?.clipConfig?.include_audio ?? true));
   const handleToggleAudio = useCallback(() => setIncludeAudio((prev) => !prev), []);
 
 
@@ -142,7 +145,7 @@ export function VideoEditorPage({ video, onExport, onReset, initialState }: Vide
           // 新影片：重置所有剪輯狀態
           setEndT(info.duration);
           setStartT(0);
-          setIncludeAudio(info.has_audio);
+          setIncludeAudio(isGifSource ? false : info.has_audio);
           setSavedClipState(null);
           setSelectedCropRatio(null);
           setExportConfig(null);
@@ -700,16 +703,18 @@ export function VideoEditorPage({ video, onExport, onReset, initialState }: Vide
                       : "—"}
                 </span>
               </div>
-              <div className="flex justify-between">
-                <span>音軌</span>
-                <span className="text-white/80">
-                  {exportConfig
-                    ? exportConfig.include_audio ? "有" : "無"
-                    : videoInfo
-                      ? videoInfo.has_audio ? "有" : "無"
-                      : "—"}
-                </span>
-              </div>
+              {!isGifSource && (
+                <div className="flex justify-between">
+                  <span>音軌</span>
+                  <span className="text-white/80">
+                    {exportConfig
+                      ? exportConfig.include_audio ? "有" : "無"
+                      : videoInfo
+                        ? videoInfo.has_audio ? "有" : "無"
+                        : "—"}
+                  </span>
+                </div>
+              )}
             </div>
           </div>
 
@@ -819,27 +824,29 @@ export function VideoEditorPage({ video, onExport, onReset, initialState }: Vide
                 </div>
               </div>
 
-              {/* 音訊開關 */}
-              <div className="bg-white/10 rounded-[10px] p-3">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs text-white/70 font-medium">保留音軌</span>
-                  <button
-                    onClick={handleToggleAudio}
-                    className={`relative w-10 h-[22px] rounded-full transition-colors duration-200 ${
-                      includeAudio ? "bg-[#00B4FF]" : "bg-white/20"
-                    }`}
-                  >
-                    <span
-                      className={`absolute top-[3px] left-[3px] w-4 h-4 rounded-full bg-white shadow transition-transform duration-200 ${
-                        includeAudio ? "translate-x-[18px]" : "translate-x-0"
+              {/* 音訊開關 (GIF 無音軌，隱藏) */}
+              {!isGifSource && (
+                <div className="bg-white/10 rounded-[10px] p-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs text-white/70 font-medium">保留音軌</span>
+                    <button
+                      onClick={handleToggleAudio}
+                      className={`relative w-10 h-[22px] rounded-full transition-colors duration-200 ${
+                        includeAudio ? "bg-[#00B4FF]" : "bg-white/20"
                       }`}
-                    />
-                  </button>
+                    >
+                      <span
+                        className={`absolute top-[3px] left-[3px] w-4 h-4 rounded-full bg-white shadow transition-transform duration-200 ${
+                          includeAudio ? "translate-x-[18px]" : "translate-x-0"
+                        }`}
+                      />
+                    </button>
+                  </div>
+                  {!videoInfo?.has_audio && (
+                    <p className="text-[10px] text-white/30 mt-1">此影片無音軌</p>
+                  )}
                 </div>
-                {!videoInfo?.has_audio && (
-                  <p className="text-[10px] text-white/30 mt-1">此影片無音軌</p>
-                )}
-              </div>
+              )}
 
               {/* 裁切比例 */}
               <div className="bg-white/10 rounded-[10px] p-3">
@@ -965,21 +972,37 @@ export function VideoEditorPage({ video, onExport, onReset, initialState }: Vide
                 <div className="absolute inset-0 overflow-hidden">
                   {/* 影片層 — 播放中裁切效果持續生效 */}
                   <div className="absolute inset-0 flex items-center justify-center">
-                    <video
-                      ref={videoRef}
-                      src={videoUrlRef.current}
-                      className="max-w-none pointer-events-none"
-                      style={{
-                        width: effectiveVideoW * transform.displayMultiplier,
-                        height: effectiveVideoH * transform.displayMultiplier,
-                        transform: transform.videoTransform,
-                        transformOrigin: "center center",
-                        transition: isSnappingBack ? "transform 200ms ease-out" : "none",
-                        willChange: "transform",
-                      }}
-                      muted
-                      playsInline
-                    />
+                    {isGifSource ? (
+                      <img
+                        src={videoUrlRef.current}
+                        className="max-w-none pointer-events-none"
+                        style={{
+                          width: effectiveVideoW * transform.displayMultiplier,
+                          height: effectiveVideoH * transform.displayMultiplier,
+                          transform: transform.videoTransform,
+                          transformOrigin: "center center",
+                          transition: isSnappingBack ? "transform 200ms ease-out" : "none",
+                          willChange: "transform",
+                        }}
+                        draggable={false}
+                      />
+                    ) : (
+                      <video
+                        ref={videoRef}
+                        src={videoUrlRef.current}
+                        className="max-w-none pointer-events-none"
+                        style={{
+                          width: effectiveVideoW * transform.displayMultiplier,
+                          height: effectiveVideoH * transform.displayMultiplier,
+                          transform: transform.videoTransform,
+                          transformOrigin: "center center",
+                          transition: isSnappingBack ? "transform 200ms ease-out" : "none",
+                          willChange: "transform",
+                        }}
+                        muted
+                        playsInline
+                      />
+                    )}
                   </div>
 
                   <CropOverlay
@@ -1014,20 +1037,22 @@ export function VideoEditorPage({ video, onExport, onReset, initialState }: Vide
                       {formatTime(startT)}
                     </span>
 
-                    <button
-                      onClick={handlePlayPause}
-                      className="w-9 h-9 flex items-center justify-center rounded-full bg-[#00B4FF] text-white hover:brightness-110 btn-vic transition-all"
-                    >
-                      {isPlaying ? (
-                        <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
-                          <path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z" />
-                        </svg>
-                      ) : (
-                        <svg className="w-4 h-4 ml-0.5" viewBox="0 0 24 24" fill="currentColor">
-                          <path d="M8 5v14l11-7z" />
-                        </svg>
-                      )}
-                    </button>
+                    {!isGifSource && (
+                      <button
+                        onClick={handlePlayPause}
+                        className="w-9 h-9 flex items-center justify-center rounded-full bg-[#00B4FF] text-white hover:brightness-110 btn-vic transition-all"
+                      >
+                        {isPlaying ? (
+                          <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z" />
+                          </svg>
+                        ) : (
+                          <svg className="w-4 h-4 ml-0.5" viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M8 5v14l11-7z" />
+                          </svg>
+                        )}
+                      </button>
+                    )}
 
                     <span className="text-xs text-white/40 font-mono">
                       {formatTime(endT)}
@@ -1047,23 +1072,47 @@ export function VideoEditorPage({ video, onExport, onReset, initialState }: Vide
                 transition: "transform 0.4s cubic-bezier(0.4, 0, 0.2, 1)",
               }}
             >
-              <video
-                ref={videoRef}
-                src={videoUrlRef.current}
-                className="absolute pointer-events-none max-w-none max-h-none"
-                style={{
-                  // crop 座標在 effectiveVideo 像素空間，百分比需匹配
-                  // max-w-none: 覆寫 Tailwind preflight 的 max-width:100%
-                  width: `${(effectiveVideoW / exportConfig.crop_w) * 100}%`,
-                  height: `${(effectiveVideoH / exportConfig.crop_h) * 100}%`,
-                  left: `${(-exportConfig.crop_x / exportConfig.crop_w) * 100}%`,
-                  top: `${(-exportConfig.crop_y / exportConfig.crop_h) * 100}%`,
-                }}
-                muted
-                autoPlay
-                playsInline
-              />
+              {isGifSource ? (
+                <img
+                  src={videoUrlRef.current}
+                  className="absolute pointer-events-none max-w-none max-h-none"
+                  style={{
+                    width: `${(effectiveVideoW / exportConfig.crop_w) * 100}%`,
+                    height: `${(effectiveVideoH / exportConfig.crop_h) * 100}%`,
+                    left: `${(-exportConfig.crop_x / exportConfig.crop_w) * 100}%`,
+                    top: `${(-exportConfig.crop_y / exportConfig.crop_h) * 100}%`,
+                  }}
+                  draggable={false}
+                />
+              ) : (
+                <video
+                  ref={videoRef}
+                  src={videoUrlRef.current}
+                  className="absolute pointer-events-none max-w-none max-h-none"
+                  style={{
+                    width: `${(effectiveVideoW / exportConfig.crop_w) * 100}%`,
+                    height: `${(effectiveVideoH / exportConfig.crop_h) * 100}%`,
+                    left: `${(-exportConfig.crop_x / exportConfig.crop_w) * 100}%`,
+                    top: `${(-exportConfig.crop_y / exportConfig.crop_h) * 100}%`,
+                  }}
+                  muted
+                  autoPlay
+                  playsInline
+                />
+              )}
             </div>
+          ) : isGifSource ? (
+            /* ── GIF 播放器 ── */
+            <img
+              src={videoUrlRef.current}
+              className="max-w-full max-h-full"
+              style={{
+                transform: defaultVideoTransform,
+                transition: "transform 0.4s cubic-bezier(0.4, 0, 0.2, 1)",
+                ...(isRotated90 ? { maxWidth: "100vh", maxHeight: "100vw" } : {}),
+              }}
+              draggable={false}
+            />
           ) : (
             /* ── 一般影片播放器 ── */
             <video

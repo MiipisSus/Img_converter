@@ -39,6 +39,7 @@ export function VideoExportPage({
   onReset,
 }: VideoExportPageProps) {
   const { clipConfig, rotate, flipH, flipV } = exportState;
+  const isGifSource = video.file.type === "image/gif";
 
   // ── 影片資訊 (API，用於 sidebar 顯示) ──
   const [videoInfo, setVideoInfo] = useState<VideoInfoResult | null>(null);
@@ -857,31 +858,60 @@ export function VideoExportPage({
                 : { display: "contents" as const }
             }
           >
-            {/* 單一 video 元素 — 永不 unmount，避免閃爍與 metadata 遺失 */}
-            <video
-              ref={videoRef}
-              src={videoUrl}
-              onLoadedMetadata={handleLoadedMetadata}
-              style={
-                hasCrop
-                  ? {
-                      position: "absolute" as const,
-                      width: `${(nativeSize!.w / clipConfig!.crop_w) * 100}%`,
-                      height: `${(nativeSize!.h / clipConfig!.crop_h) * 100}%`,
-                      left: `${-(clipConfig!.crop_x / clipConfig!.crop_w) * 100}%`,
-                      top: `${-(clipConfig!.crop_y / clipConfig!.crop_h) * 100}%`,
-                      maxWidth: "none",
-                    }
-                  : {
-                      maxWidth: "100%",
-                      maxHeight: "100%",
-                      transform: previewTransform || undefined,
-                    }
-              }
-              muted
-              autoPlay
-              playsInline
-            />
+            {/* 預覽元素 — GIF 使用 img，影片使用 video */}
+            {isGifSource ? (
+              <img
+                src={videoUrl}
+                onLoad={(e) => {
+                  const img = e.currentTarget;
+                  if (img.naturalWidth > 0) {
+                    setNativeSize({ w: img.naturalWidth, h: img.naturalHeight });
+                  }
+                }}
+                style={
+                  hasCrop
+                    ? {
+                        position: "absolute" as const,
+                        width: `${(nativeSize!.w / clipConfig!.crop_w) * 100}%`,
+                        height: `${(nativeSize!.h / clipConfig!.crop_h) * 100}%`,
+                        left: `${-(clipConfig!.crop_x / clipConfig!.crop_w) * 100}%`,
+                        top: `${-(clipConfig!.crop_y / clipConfig!.crop_h) * 100}%`,
+                        maxWidth: "none",
+                      }
+                    : {
+                        maxWidth: "100%",
+                        maxHeight: "100%",
+                        transform: previewTransform || undefined,
+                      }
+                }
+                draggable={false}
+              />
+            ) : (
+              <video
+                ref={videoRef}
+                src={videoUrl}
+                onLoadedMetadata={handleLoadedMetadata}
+                style={
+                  hasCrop
+                    ? {
+                        position: "absolute" as const,
+                        width: `${(nativeSize!.w / clipConfig!.crop_w) * 100}%`,
+                        height: `${(nativeSize!.h / clipConfig!.crop_h) * 100}%`,
+                        left: `${-(clipConfig!.crop_x / clipConfig!.crop_w) * 100}%`,
+                        top: `${-(clipConfig!.crop_y / clipConfig!.crop_h) * 100}%`,
+                        maxWidth: "none",
+                      }
+                    : {
+                        maxWidth: "100%",
+                        maxHeight: "100%",
+                        transform: previewTransform || undefined,
+                      }
+                }
+                muted
+                autoPlay
+                playsInline
+              />
+            )}
           </div>
 
           {/* 影片載入中 spinner overlay */}

@@ -12,18 +12,19 @@ interface UploadPageProps {
 /** 拖曳偵測到的檔案類型 */
 type DragHint = "none" | "image" | "video" | "mixed";
 
-/** 從 FileList 分離圖片與影片 */
+/** 從 FileList 分離圖片與影片 (GIF 歸類為影片) */
 function classifyFiles(files: FileList) {
   const images: File[] = [];
   const videos: File[] = [];
   for (const f of Array.from(files)) {
-    if (f.type.startsWith("image/")) images.push(f);
+    if (f.type === "image/gif") videos.push(f);
+    else if (f.type.startsWith("image/")) images.push(f);
     else if (f.type.startsWith("video/")) videos.push(f);
   }
   return { images, videos };
 }
 
-/** 根據拖曳中的 MIME 推斷檔案類型 */
+/** 根據拖曳中的 MIME 推斷檔案類型 (GIF 歸類為影片) */
 function detectDragHint(e: React.DragEvent): DragHint {
   const items = e.dataTransfer.items;
   if (!items || items.length === 0) return "none";
@@ -31,8 +32,9 @@ function detectDragHint(e: React.DragEvent): DragHint {
   let hasVideo = false;
   for (let i = 0; i < items.length; i++) {
     const t = items[i].type;
-    if (t.startsWith("image/")) hasImage = true;
-    if (t.startsWith("video/")) hasVideo = true;
+    if (t === "image/gif") hasVideo = true;
+    else if (t.startsWith("image/")) hasImage = true;
+    else if (t.startsWith("video/")) hasVideo = true;
   }
   if (hasImage && hasVideo) return "mixed";
   if (hasImage) return "image";
@@ -242,7 +244,7 @@ export function UploadPage({ onImagesLoaded, onVideoLoaded }: UploadPageProps) {
                   圖片：JPG, PNG, WebP 等（可多選）
                 </p>
                 <p className="text-sm text-gray-500">
-                  影片：MP4, WebM, AVI, MOV（單一檔案）
+                  影片 / GIF：MP4, WebM, AVI, MOV, GIF（單一檔案）
                 </p>
               </>
             )}
