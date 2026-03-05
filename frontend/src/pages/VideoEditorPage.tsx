@@ -649,8 +649,8 @@ export function VideoEditorPage({ video, onExport, onReset, initialState }: Vide
 
       setIsCropAnimating(true);
       transform.setCropBox({ cropX: newX, cropY: newY, cropW: newW, cropH: newH });
-      transform.setTranslate(0, 0);
-      transform.setScale(1);
+      // 保留當前縮放與位移，僅 clamp 確保影片仍覆蓋新裁切框
+      transform.clampPosition();
       setTimeout(() => setIsCropAnimating(false), 450);
     },
     [cropContainerSize, transform],
