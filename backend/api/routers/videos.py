@@ -35,12 +35,13 @@ router = APIRouter(prefix="/videos", tags=["影片處理"])
 executor = ThreadPoolExecutor(max_workers=2)
 
 # 允許的影片副檔名
-ALLOWED_EXTENSIONS = {'mp4', 'webm', 'avi', 'mov', 'mkv'}
+ALLOWED_EXTENSIONS = {'mp4', 'webm', 'avi', 'mov', 'mkv', 'gif'}
 
 # 影片 MIME 類型對照
 FORMAT_TO_MIME = {
     'mp4': 'video/mp4',
     'webm': 'video/webm',
+    'gif': 'image/gif',
 }
 
 # 最大上傳限制 (500MB)
@@ -79,6 +80,7 @@ def _process_task(
     output_format: str,
     include_audio: bool,
     quality_preset: str,
+    source_ext: str = ".mp4",
 ):
     """
     在背景執行緒中執行影片處理。
@@ -106,6 +108,7 @@ def _process_task(
             include_audio=include_audio,
             quality_preset=quality_preset,
             on_progress=on_progress,
+            source_ext=source_ext,
         )
 
         # 寫入暫存輸出檔
@@ -143,7 +146,7 @@ def _process_task(
 async def get_video_info(
     video: UploadFile = File(..., description="影片檔案"),
 ):
-    _validate_video_extension(video.filename or "")
+    ext = _validate_video_extension(video.filename or "")
     video_bytes = await video.read()
 
     if len(video_bytes) > MAX_VIDEO_SIZE:
@@ -151,7 +154,7 @@ async def get_video_info(
 
     try:
         service = VideoService()
-        info = await _run_in_executor(service.get_video_info, video_bytes)
+        info = await _run_in_executor(service.get_video_info, video_bytes, f".{ext}")
         return VideoInfoResponse(**info)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"影片資訊讀取失敗：{str(e)}")
@@ -169,8 +172,9 @@ async def estimate_config(
     video: UploadFile = File(..., description="影片檔案"),
     target_kb: Optional[int] = Form(default=None, ge=1, description="目標檔案大小 (KB)"),
     include_audio: bool = Form(default=True, description="是否包含音軌"),
+    output_format: str = Form(default="mp4", description="輸出格式 (mp4/webm/gif)"),
 ):
-    _validate_video_extension(video.filename or "")
+    ext = _validate_video_extension(video.filename or "")
     video_bytes = await video.read()
 
     if len(video_bytes) > MAX_VIDEO_SIZE:
@@ -180,6 +184,7 @@ async def estimate_config(
         service = VideoService()
         config = await _run_in_executor(
             service.estimate_config, video_bytes, target_kb, include_audio,
+            f".{ext}", output_format,
         )
         return BitrateEstimateResponse(**config)
     except ValueError as e:
@@ -202,7 +207,7 @@ async def estimate_config(
 async def submit_compress(
     video: UploadFile = File(..., description="影片檔案"),
     target_kb: Optional[int] = Form(default=None, ge=1, description="目標檔案大小 (KB)"),
-    output_format: str = Form(default="mp4", description="輸出格式 (mp4/webm)"),
+    output_format: str = Form(default="mp4", description="輸出格式 (mp4/webm/gif)"),
     include_audio: bool = Form(default=True, description="是否保留音軌"),
     quality_preset: str = Form(default="medium", description="編碼品質 (ultrafast/fast/medium/slow/veryslow)"),
     # 處理管線參數
@@ -217,7 +222,7 @@ async def submit_compress(
     crop_w: Optional[int] = Form(default=None, gt=0, description="裁切寬度 (像素)"),
     crop_h: Optional[int] = Form(default=None, gt=0, description="裁切高度 (像素)"),
 ):
-    _validate_video_extension(video.filename or "")
+    ext = _validate_video_extension(video.filename or "")
     video_bytes = await video.read()
 
     if len(video_bytes) > MAX_VIDEO_SIZE:
@@ -228,6 +233,10 @@ async def submit_compress(
             status_code=400,
             detail=f"不支援的輸出格式：{output_format}。支援格式：{', '.join(sorted(VideoService.SUPPORTED_OUTPUT_FORMATS))}",
         )
+
+    # GIF 不支援音訊，強制關閉
+    if output_format == "gif":
+        include_audio = False
 
     valid_presets = {"ultrafast", "superfast", "fast", "medium", "slow", "veryslow"}
     if quality_preset not in valid_presets:
@@ -266,10 +275,11 @@ async def submit_compress(
     task_id = uuid.uuid4().hex[:12]
 
     # 先取得預估配置
+    source_ext = f".{ext}"
     estimated_config: Dict[str, Any] = {}
     try:
         service = VideoService()
-        info = await _run_in_executor(service.get_video_info, video_bytes)
+        info = await _run_in_executor(service.get_video_info, video_bytes, source_ext)
         duration = info["duration"]
         height = info["height"]
         has_audio = info["has_audio"] and include_audio
@@ -287,6 +297,7 @@ async def submit_compress(
                 duration_sec=effective_duration,
                 include_audio=has_audio,
                 video_height=height,
+                output_format=output_format,
             )
             estimated_config["estimated_video_bitrate_kbps"] = bc.video_bitrate_kbps
             estimated_config["estimated_audio_bitrate_kbps"] = bc.audio_bitrate_kbps
@@ -295,7 +306,7 @@ async def submit_compress(
         pass
 
     # 將上傳內容寫入暫存檔
-    fd, input_path = tempfile.mkstemp(suffix=".mp4")
+    fd, input_path = tempfile.mkstemp(suffix=source_ext)
     try:
         os.write(fd, video_bytes)
     finally:
@@ -318,7 +329,7 @@ async def submit_compress(
         executor,
         _process_task,
         task_id, input_path, params, target_kb,
-        output_format, include_audio, quality_preset,
+        output_format, include_audio, quality_preset, source_ext,
     )
 
     return TaskSubmitResponse(
@@ -372,7 +383,7 @@ async def get_task_status(task_id: str):
     summary="下載處理後的影片",
     description="任務完成後，透過此端點下載處理後的影片檔案",
     responses={
-        200: {"content": {"video/mp4": {}, "video/webm": {}}},
+        200: {"content": {"video/mp4": {}, "video/webm": {}, "image/gif": {}}},
         404: {"description": "任務不存在或尚未完成"},
     },
 )

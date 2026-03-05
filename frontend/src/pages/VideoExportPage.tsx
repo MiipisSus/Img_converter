@@ -56,6 +56,9 @@ export function VideoExportPage({
   const [targetUnit, setTargetUnit] = useState<"KB" | "MB" | "GB">("MB");
   const [targetKB, setTargetKB] = useState<number | null>(null);
 
+  // ── 輸出格式 ──
+  const [outputFormat, setOutputFormat] = useState<"mp4" | "gif">("mp4");
+
   // ── 編碼強度 ──
   const [encodingPreset, setEncodingPreset] = useState<"fast" | "medium" | "veryslow">("medium");
 
@@ -85,7 +88,7 @@ export function VideoExportPage({
       ? (clipConfig?.end_t ?? videoInfo.duration) -
         (clipConfig?.start_t ?? 0)
       : 0;
-  const includeAudio = clipConfig?.include_audio ?? true;
+  const includeAudio = outputFormat === "gif" ? false : (clipConfig?.include_audio ?? true);
   const originalSizeKB = videoInfo ? Math.round(videoInfo.file_size / 1024) : 0;
   const estimatedSizeKB = videoInfo && videoInfo.duration > 0
     ? Math.round(originalSizeKB * (trimDuration / videoInfo.duration))
@@ -103,13 +106,19 @@ export function VideoExportPage({
   const cropW = clipConfig?.crop_w ?? videoInfo?.width ?? 0;
   const cropH = clipConfig?.crop_h ?? videoInfo?.height ?? 0;
 
+  // GIF 目標大小上限 (15MB)
+  const GIF_MAX_KB = 15 * 1024;
+
   // 畫質計算
   const videoBitrateKbps = (() => {
     if (!targetKB || trimDuration <= 0) return null;
     const totalBits = targetKB * 1024 * 8 * 0.98;
     const audioBits = includeAudio ? 128 * 1000 * trimDuration : 0;
     const videoBits = totalBits - audioBits;
-    return Math.round(videoBits / trimDuration / 1000);
+    let kbps = Math.round(videoBits / trimDuration / 1000);
+    // GIF 壓縮效率低，預估位元率需乘以 4 倍
+    if (outputFormat === "gif") kbps = kbps * 4;
+    return kbps;
   })();
 
   const qualityTier = (() => {
@@ -277,17 +286,19 @@ export function VideoExportPage({
       // Sanity check: 不超過估計大小的 1.2 倍
       if (estimatedSizeKB > 0) {
         const maxKB = Math.round(estimatedSizeKB * 1.2);
-        if (kb > maxKB) {
-          kb = maxKB;
-          const displayVal = kb / unitToKB[targetUnit];
-          setTargetInput(displayVal >= 10 ? String(Math.round(displayVal)) : displayVal.toFixed(1));
-        }
+        if (kb > maxKB) kb = maxKB;
+      }
+      // GIF 上限 15MB
+      if (outputFormat === "gif" && kb > GIF_MAX_KB) kb = GIF_MAX_KB;
+      if (kb !== Math.round(val * unitToKB[targetUnit])) {
+        const displayVal = kb / unitToKB[targetUnit];
+        setTargetInput(displayVal >= 10 ? String(Math.round(displayVal)) : displayVal.toFixed(1));
       }
       setTargetKB(kb);
     } else {
       setTargetKB(null);
     }
-  }, [targetInput, targetUnit, estimatedSizeKB]);
+  }, [targetInput, targetUnit, estimatedSizeKB, outputFormat]);
 
   const handleTargetKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -340,6 +351,7 @@ export function VideoExportPage({
     try {
       const result = await submitCompress(video.file, {
         target_kb: targetKB ?? undefined,
+        output_format: outputFormat,
         start_t: clipConfig?.start_t,
         end_t: clipConfig?.end_t,
         crop_x: clipConfig?.crop_x,
@@ -390,7 +402,7 @@ export function VideoExportPage({
       setError(err instanceof Error ? err.message : "提交任務失敗");
       setExporting(false);
     }
-  }, [videoInfo, video.file, targetKB, clipConfig, rotate, flipH, flipV, includeAudio, encodingPreset]);
+  }, [videoInfo, video.file, targetKB, outputFormat, clipConfig, rotate, flipH, flipV, includeAudio, encodingPreset]);
 
   // ── 下載 ──
   const handleDownload = useCallback(async () => {
@@ -401,7 +413,8 @@ export function VideoExportPage({
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `${video.name.replace(/\.[^.]+$/, "")}_export.mp4`;
+      const ext = outputFormat === "gif" ? "gif" : "mp4";
+      a.download = `${video.name.replace(/\.[^.]+$/, "")}_export.${ext}`;
       a.click();
       URL.revokeObjectURL(url);
       await cleanupTask(taskId);
@@ -410,7 +423,7 @@ export function VideoExportPage({
     } finally {
       setDownloading(false);
     }
-  }, [taskId, video.name]);
+  }, [taskId, video.name, outputFormat]);
 
   // ── CSS 旋轉/翻轉 (預覽用) ──
   const previewTransform = [
@@ -464,11 +477,51 @@ export function VideoExportPage({
                     <span>長度</span>
                     <span className="text-white/80">{fmtTime(trimDuration)}</span>
                   </div>
-                  <div className="flex justify-between">
-                    <span>音軌</span>
-                    <span className="text-white/80">{includeAudio ? "有" : "無"}</span>
-                  </div>
+                  {outputFormat !== "gif" && (
+                    <div className="flex justify-between">
+                      <span>音軌</span>
+                      <span className="text-white/80">{includeAudio ? "有" : "無"}</span>
+                    </div>
+                  )}
                 </div>
+              </div>
+
+              {/* ── 輸出格式 ── */}
+              <div className="bg-white/10 rounded-[10px] p-3">
+                <p className="text-xs text-white/70 mb-3 font-medium">輸出格式</p>
+                <div className="flex gap-2">
+                  {([
+                    ["mp4", "MP4 (影片)"],
+                    ["gif", "GIF (動圖)"],
+                  ] as const).map(([val, label]) => (
+                    <button
+                      key={val}
+                      onClick={() => {
+                        setOutputFormat(val);
+                        setActivePreset(null);
+                        // 切換到 GIF 時，若目標大小超過上限則截斷
+                        if (val === "gif" && targetKB !== null && targetKB > GIF_MAX_KB) {
+                          setTargetKB(GIF_MAX_KB);
+                          const displayVal = GIF_MAX_KB / unitToKB[targetUnit];
+                          setTargetInput(displayVal >= 10 ? String(Math.round(displayVal)) : displayVal.toFixed(1));
+                        }
+                      }}
+                      disabled={exporting}
+                      className={`flex-1 px-2 py-1.5 text-sm rounded-[10px] transition-colors disabled:opacity-40 ${
+                        outputFormat === val
+                          ? "bg-[#00B4FF] text-white font-medium"
+                          : "bg-white/10 text-white/80 hover:bg-white/20"
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+                {outputFormat === "gif" && (
+                  <p className="text-[11px] text-yellow-400/80 mt-2">
+                    注意：GIF 不支援聲音，且相同畫質下體積會比影片大很多。
+                  </p>
+                )}
               </div>
 
               {/* ── 導出預設 ── */}
@@ -612,33 +665,35 @@ export function VideoExportPage({
                 )}
               </div>
 
-              {/* ── 編碼強度 ── */}
-              <div className="bg-white/10 rounded-[10px] p-3">
-                <p className="text-xs text-white/70 font-medium mb-2">編碼強度</p>
-                <div className="flex rounded-lg overflow-hidden border border-white/10">
-                  {([
-                    { key: "fast", label: "快速" },
-                    { key: "medium", label: "均衡" },
-                    { key: "veryslow", label: "高品質" },
-                  ] as const).map(({ key, label }) => (
-                    <button
-                      key={key}
-                      onClick={() => { setEncodingPreset(key); setActivePreset(null); }}
-                      disabled={exporting}
-                      className={`flex-1 py-2 text-xs font-medium transition-colors disabled:opacity-40 ${
-                        encodingPreset === key
-                          ? "bg-[#00B4FF] text-white"
-                          : "bg-white/5 text-white/60 hover:bg-white/10"
-                      }`}
-                    >
-                      {label}
-                    </button>
-                  ))}
+              {/* ── 編碼強度 (GIF 不需要) ── */}
+              {outputFormat !== "gif" && (
+                <div className="bg-white/10 rounded-[10px] p-3">
+                  <p className="text-xs text-white/70 font-medium mb-2">編碼強度</p>
+                  <div className="flex rounded-lg overflow-hidden border border-white/10">
+                    {([
+                      { key: "fast", label: "快速" },
+                      { key: "medium", label: "均衡" },
+                      { key: "veryslow", label: "高品質" },
+                    ] as const).map(({ key, label }) => (
+                      <button
+                        key={key}
+                        onClick={() => { setEncodingPreset(key); setActivePreset(null); }}
+                        disabled={exporting}
+                        className={`flex-1 py-2 text-xs font-medium transition-colors disabled:opacity-40 ${
+                          encodingPreset === key
+                            ? "bg-[#00B4FF] text-white"
+                            : "bg-white/5 text-white/60 hover:bg-white/10"
+                        }`}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                  <p className="text-[10px] text-white/30 mt-2">
+                    {{ fast: "編碼速度快，適合快速預覽", medium: "速度與畫質均衡", veryslow: "最佳畫質，編碼時間較長" }[encodingPreset]}
+                  </p>
                 </div>
-                <p className="text-[10px] text-white/30 mt-2">
-                  {{ fast: "編碼速度快，適合快速預覽", medium: "速度與畫質均衡", veryslow: "最佳畫質，編碼時間較長" }[encodingPreset]}
-                </p>
-              </div>
+              )}
 
               {/* ── 匯出結果 ── */}
               {outputInfo && (
@@ -690,7 +745,7 @@ export function VideoExportPage({
             disabled={!outputInfo || downloading}
             className="w-full px-4 py-3 bg-white/10 text-white font-bold rounded-[10px] transition-all disabled:opacity-30"
           >
-            {downloading ? "下載中..." : "下載影片"}
+            {downloading ? "下載中..." : outputFormat === "gif" ? "下載 GIF" : "下載影片"}
           </button>
           <button
             onClick={onReturn}

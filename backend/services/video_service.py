@@ -71,6 +71,7 @@ def calculate_bitrate(
     duration_sec: float,
     include_audio: bool = True,
     video_height: Optional[int] = None,
+    output_format: str = "mp4",
 ) -> BitrateConfig:
     """
     位元率預算精確計算
@@ -79,17 +80,29 @@ def calculate_bitrate(
     - 總位元 = target_kb × 1024 × 8 × 0.98 (扣除 2% MP4 封裝損耗)
     - 音訊位元 = 128,000 × duration_sec (AAC 128kbps)
     - 影像位元率 = (總位元 - 音訊位元) / duration_sec
+
+    GIF 特殊處理：
+    - GIF 壓縮效率遠低於 H.264，預估體積需乘以 4 倍係數
+    - GIF 不含音訊
     """
     if duration_sec <= 0:
         raise ValueError("影片時長必須大於 0 秒")
     if target_kb <= 0:
         raise ValueError("目標檔案大小必須大於 0 KB")
 
+    # GIF 強制無音訊
+    if output_format == "gif":
+        include_audio = False
+
     audio_bitrate_kbps = 128 if include_audio else 0
     audio_bits = audio_bitrate_kbps * 1000 * duration_sec
     total_bits = target_kb * 1024 * 8 * 0.98
     video_bits = total_bits - audio_bits
     video_bitrate_kbps = int(video_bits / duration_sec / 1000)
+
+    # GIF 壓縮效率低，預估位元率需乘以 4 倍才能反映真實體積
+    if output_format == "gif":
+        video_bitrate_kbps = video_bitrate_kbps * 4
 
     warning: Optional[str] = None
 
@@ -152,17 +165,17 @@ class _ProgressLogger:
 class VideoService:
     """影片處理服務類別"""
 
-    SUPPORTED_FORMATS = {'mp4', 'webm', 'avi', 'mov', 'mkv'}
-    SUPPORTED_OUTPUT_FORMATS = {'mp4', 'webm'}
+    SUPPORTED_FORMATS = {'mp4', 'webm', 'avi', 'mov', 'mkv', 'gif'}
+    SUPPORTED_OUTPUT_FORMATS = {'mp4', 'webm', 'gif'}
 
     def __init__(self):
         self._executor = ThreadPoolExecutor(max_workers=2)
 
-    def get_video_info(self, video_bytes: bytes) -> dict:
+    def get_video_info(self, video_bytes: bytes, source_ext: str = ".mp4") -> dict:
         """取得影片基本資訊"""
         from moviepy import VideoFileClip
 
-        tmp_path = self._write_temp(video_bytes, suffix=".mp4")
+        tmp_path = self._write_temp(video_bytes, suffix=source_ext)
         try:
             clip = VideoFileClip(tmp_path)
             info = {
@@ -187,6 +200,7 @@ class VideoService:
         include_audio: bool = True,
         quality_preset: str = "medium",
         on_progress: Optional[Callable[[int], None]] = None,
+        source_ext: str = ".mp4",
     ) -> Tuple[bytes, dict]:
         """
         影片處理管線：裁剪 → 旋轉 → 翻轉 → 縮放 → 編碼
@@ -196,16 +210,17 @@ class VideoService:
         2. rotate (旋轉) — 含 expand=True 自動調整畫布
         3. mirror_x (水平翻轉)
         4. resize (縮放) — 最後做，確保最終尺寸正確
-        5. even_size — H.264 要求偶數解析度
+        5. even_size — H.264 要求偶數解析度 (GIF 不需要)
 
         Args:
             video_bytes: 原始影片位元組
             params: 處理參數 (裁剪/旋轉/翻轉/縮放)
             target_kb: 目標檔案大小 (KB)，None 表示不限制
-            output_format: 輸出格式 (mp4/webm)
+            output_format: 輸出格式 (mp4/webm/gif)
             include_audio: 是否保留音軌
             quality_preset: FFmpeg preset (ultrafast/fast/medium/slow)
             on_progress: 進度回調 fn(percent: int)
+            source_ext: 來源檔案副檔名 (如 .gif, .mp4)
         """
         from moviepy import VideoFileClip
         from moviepy.video.fx import Crop, Rotate, MirrorX, MirrorY, Resize, EvenSize
@@ -213,7 +228,11 @@ class VideoService:
         if params is None:
             params = VideoProcessParams()
 
-        tmp_input = self._write_temp(video_bytes, suffix=".mp4")
+        # GIF 不支援音訊，強制關閉
+        if output_format == "gif":
+            include_audio = False
+
+        tmp_input = self._write_temp(video_bytes, suffix=source_ext)
         tmp_output = tempfile.mktemp(suffix=f".{output_format}")
 
         try:
@@ -262,8 +281,9 @@ class VideoService:
                 tw = _ensure_even(params.target_w)
                 clip = clip.with_effects([Resize(width=tw)])
 
-            # ── 步驟 6: 確保偶數解析度 (H.264 硬性要求) ──
-            clip = clip.with_effects([EvenSize()])
+            # ── 步驟 6: 確保偶數解析度 (H.264 硬性要求，GIF 不需要) ──
+            if output_format != "gif":
+                clip = clip.with_effects([EvenSize()])
 
             # 處理後的資訊
             duration = clip.duration
@@ -273,49 +293,61 @@ class VideoService:
 
             # ── 計算位元率 ──
             bitrate_config: Optional[BitrateConfig] = None
-            ffmpeg_params = ["-preset", quality_preset]
 
-            if target_kb is not None:
-                bitrate_config = calculate_bitrate(
-                    target_kb=target_kb,
-                    duration_sec=duration,
-                    include_audio=has_audio,
-                    video_height=height,
+            if output_format == "gif":
+                # ── GIF 輸出路徑 ──
+                progress_logger = _ProgressLogger(duration, on_progress)
+                clip.write_gif(
+                    tmp_output,
+                    fps=15,
+                    logger=progress_logger.logger,
                 )
-                video_br = f"{bitrate_config.video_bitrate_kbps}k"
-                audio_br = f"{bitrate_config.audio_bitrate_kbps}k" if has_audio else None
-                ffmpeg_params.extend([
-                    "-b:v", video_br,
-                    "-maxrate", video_br,
-                    "-bufsize", f"{bitrate_config.video_bitrate_kbps * 2}k",
-                ])
-                if bitrate_config.warning:
-                    warnings.append(bitrate_config.warning)
+                clip.close()
             else:
-                video_br = None
-                audio_br = "128k" if has_audio else None
-                ffmpeg_params.extend(["-crf", "23"])
+                # ── 影片輸出路徑 (mp4/webm) ──
+                ffmpeg_params = ["-preset", quality_preset]
 
-            # ── 建立進度 logger ──
-            progress_logger = _ProgressLogger(duration, on_progress)
+                if target_kb is not None:
+                    bitrate_config = calculate_bitrate(
+                        target_kb=target_kb,
+                        duration_sec=duration,
+                        include_audio=has_audio,
+                        video_height=height,
+                    )
+                    video_br = f"{bitrate_config.video_bitrate_kbps}k"
+                    audio_br = f"{bitrate_config.audio_bitrate_kbps}k" if has_audio else None
+                    ffmpeg_params.extend([
+                        "-b:v", video_br,
+                        "-maxrate", video_br,
+                        "-bufsize", f"{bitrate_config.video_bitrate_kbps * 2}k",
+                    ])
+                    if bitrate_config.warning:
+                        warnings.append(bitrate_config.warning)
+                else:
+                    video_br = None
+                    audio_br = "128k" if has_audio else None
+                    ffmpeg_params.extend(["-crf", "23"])
 
-            # ── 寫出影片 ──
-            codec = "libx264" if output_format == "mp4" else "libvpx-vp9"
-            write_kwargs = {
-                "codec": codec,
-                "audio": has_audio,
-                "audio_codec": "aac" if has_audio else None,
-                "ffmpeg_params": ffmpeg_params,
-                "logger": progress_logger.logger,
-                "threads": 4,
-            }
-            if audio_br and has_audio:
-                write_kwargs["audio_bitrate"] = audio_br
-            if video_br:
-                write_kwargs["bitrate"] = video_br
+                # ── 建立進度 logger ──
+                progress_logger = _ProgressLogger(duration, on_progress)
 
-            clip.write_videofile(tmp_output, **write_kwargs)
-            clip.close()
+                # ── 寫出影片 ──
+                codec = "libx264" if output_format == "mp4" else "libvpx-vp9"
+                write_kwargs = {
+                    "codec": codec,
+                    "audio": has_audio,
+                    "audio_codec": "aac" if has_audio else None,
+                    "ffmpeg_params": ffmpeg_params,
+                    "logger": progress_logger.logger,
+                    "threads": 4,
+                }
+                if audio_br and has_audio:
+                    write_kwargs["audio_bitrate"] = audio_br
+                if video_br:
+                    write_kwargs["bitrate"] = video_br
+
+                clip.write_videofile(tmp_output, **write_kwargs)
+                clip.close()
 
             # ── 讀取結果 ──
             with open(tmp_output, "rb") as f:
@@ -323,8 +355,8 @@ class VideoService:
 
             result_size_kb = len(result_bytes) / 1024
 
-            # ── 二次壓制 (若超出目標) ──
-            if target_kb is not None and result_size_kb > target_kb:
+            # ── 二次壓制 (若超出目標，GIF 不支援二次壓制) ──
+            if target_kb is not None and result_size_kb > target_kb and output_format != "gif":
                 result_bytes, result_size_kb = self._second_pass(
                     tmp_input, params, output_format,
                     target_kb, duration, height, has_audio,
@@ -358,11 +390,17 @@ class VideoService:
         video_bytes: bytes,
         target_kb: Optional[int] = None,
         include_audio: bool = True,
+        source_ext: str = ".mp4",
+        output_format: str = "mp4",
     ) -> dict:
         """處理前先回傳預估配置，不實際壓縮"""
         from moviepy import VideoFileClip
 
-        tmp_path = self._write_temp(video_bytes, suffix=".mp4")
+        # GIF 不支援音訊
+        if output_format == "gif":
+            include_audio = False
+
+        tmp_path = self._write_temp(video_bytes, suffix=source_ext)
         try:
             clip = VideoFileClip(tmp_path)
             duration = clip.duration
@@ -385,6 +423,7 @@ class VideoService:
                     duration_sec=duration,
                     include_audio=has_audio,
                     video_height=height,
+                    output_format=output_format,
                 )
                 result["estimated_video_bitrate_kbps"] = config.video_bitrate_kbps
                 result["estimated_audio_bitrate_kbps"] = config.audio_bitrate_kbps
