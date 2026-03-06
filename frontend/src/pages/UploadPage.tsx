@@ -59,8 +59,27 @@ export function UploadPage({ onImagesLoaded, onVideoLoaded }: UploadPageProps) {
   }, []);
 
   // ── 智能檔案處理 ──
+  const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB
+  const ALLOWED_EXTENSIONS = new Set([
+    ".mp4", ".mov", ".avi", ".gif",
+    ".jpg", ".jpeg", ".png", ".webp",
+  ]);
+
   const handleFiles = useCallback(
     async (files: FileList) => {
+      // 副檔名白名單 + 大小檢查
+      for (const f of Array.from(files)) {
+        const ext = f.name.slice(f.name.lastIndexOf(".")).toLowerCase();
+        if (!ALLOWED_EXTENSIONS.has(ext)) {
+          showAlert(`不支援的檔案格式：${ext}。僅允許 ${[...ALLOWED_EXTENSIONS].join(", ")}。`);
+          return;
+        }
+        if (f.size > MAX_FILE_SIZE) {
+          showAlert(`檔案「${f.name}」超出上傳限制（上限 50MB）。`);
+          return;
+        }
+      }
+
       const { images, videos } = classifyFiles(files);
 
       // 混合檔案

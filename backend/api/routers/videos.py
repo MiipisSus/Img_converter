@@ -50,8 +50,11 @@ FORMAT_TO_MIME = {
     'gif': 'image/gif',
 }
 
-# 最大上傳限制 (500MB)
-MAX_VIDEO_SIZE = 500 * 1024 * 1024
+# 最大上傳限制 (50MB)
+MAX_VIDEO_SIZE = 50 * 1024 * 1024
+
+# 最大影片時長 (秒)
+MAX_VIDEO_DURATION = 120
 
 # ── 全域任務狀態管理 (In-Memory Store) ──
 video_tasks: Dict[str, Dict[str, Any]] = {}
@@ -169,11 +172,18 @@ async def get_video_info(
     video_bytes = await video.read()
 
     if len(video_bytes) > MAX_VIDEO_SIZE:
-        raise HTTPException(status_code=413, detail="影片檔案超過 500MB 限制")
+        raise HTTPException(status_code=413, detail="影片檔案超過 50MB 限制")
 
     try:
         service = VideoService()
         info = await _run_in_executor(service.get_video_info, video_bytes, f".{ext}")
+
+        # 時長檢查
+        if info.get("duration", 0) > MAX_VIDEO_DURATION:
+            raise HTTPException(
+                status_code=400,
+                detail=f"影片時長 {info['duration']:.1f} 秒，超過 {MAX_VIDEO_DURATION} 秒限制",
+            )
 
         # GIF → 同步產生 MP4 預覽
         if ext == "gif":
@@ -222,7 +232,7 @@ async def estimate_config(
     video_bytes = await video.read()
 
     if len(video_bytes) > MAX_VIDEO_SIZE:
-        raise HTTPException(status_code=413, detail="影片檔案超過 500MB 限制")
+        raise HTTPException(status_code=413, detail="影片檔案超過 50MB 限制")
 
     try:
         service = VideoService()
@@ -270,7 +280,7 @@ async def submit_compress(
     video_bytes = await video.read()
 
     if len(video_bytes) > MAX_VIDEO_SIZE:
-        raise HTTPException(status_code=413, detail="影片檔案超過 500MB 限制")
+        raise HTTPException(status_code=413, detail="影片檔案超過 50MB 限制")
 
     if output_format not in VideoService.SUPPORTED_OUTPUT_FORMATS:
         raise HTTPException(
@@ -325,6 +335,12 @@ async def submit_compress(
         service = VideoService()
         info = await _run_in_executor(service.get_video_info, video_bytes, source_ext)
         duration = info["duration"]
+        if duration > MAX_VIDEO_DURATION:
+            # 清理暫存
+            raise HTTPException(
+                status_code=400,
+                detail=f"影片時長 {duration:.1f} 秒，超過 {MAX_VIDEO_DURATION} 秒限制",
+            )
         height = info["height"]
         has_audio = info["has_audio"] and include_audio
 
