@@ -70,11 +70,11 @@ export function CropOverlay({
           ))}
         </div>
 
-        {/* 四角 Handles */}
+        {/* 四角 Handles (含擴展觸控區) */}
         {(["nw", "ne", "sw", "se"] as const).map((handle) => (
           <div
             key={handle}
-            className="absolute w-4 h-4 pointer-events-auto"
+            className="absolute w-4 h-4 pointer-events-auto crop-handle"
             style={{
               top: handle.includes("n") ? -8 : "auto",
               bottom: handle.includes("s") ? -8 : "auto",
@@ -88,14 +88,15 @@ export function CropOverlay({
               borderRadius: 2,
             }}
             onMouseDown={onResizeMouseDown(handle)}
+            onTouchStart={onResizeMouseDown(handle) as unknown as React.TouchEventHandler}
           />
         ))}
 
-        {/* 四邊 Handles */}
+        {/* 四邊 Handles (含擴展觸控區) */}
         {(["n", "s", "e", "w"] as const).map((handle) => (
           <div
             key={handle}
-            className="absolute pointer-events-auto"
+            className="absolute pointer-events-auto crop-handle"
             style={{
               backgroundColor: "#00B4FF",
               borderRadius: 3,

@@ -509,9 +509,9 @@ export function VideoExportPage({
 
   // ── 永遠渲染完整佈局 (不因 loading 而 early return) ──
   return (
-    <div className="h-screen flex overflow-hidden bg-sidebar">
+    <div className="h-screen flex overflow-hidden bg-sidebar layout-editor">
       {/* ===== 左側設定面板 ===== */}
-      <aside className="w-[30%] min-w-[240px] max-w-[320px] flex flex-col h-screen sidebar-scroll overflow-y-auto bg-sidebar">
+      <aside className="w-[30%] min-w-[240px] max-w-[320px] flex flex-col h-screen sidebar-scroll overflow-y-auto bg-sidebar max-md:h-auto">
         {/* Logo */}
         <div className="p-4 pb-2 mx-auto mb-6">
           <button onClick={() => setShowResetModal(true)} className="cursor-pointer">

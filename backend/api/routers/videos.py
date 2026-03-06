@@ -34,6 +34,12 @@ router = APIRouter(prefix="/videos", tags=["影片處理"])
 # 建立執行緒池用於 CPU 密集型任務
 executor = ThreadPoolExecutor(max_workers=2)
 
+# 同時處理上限：最多 2 個轉檔任務並行，多出的排隊等待
+_compress_semaphore = asyncio.Semaphore(2)
+
+# 自動清理延遲 (秒)
+_CLEANUP_DELAY = 10 * 60  # 10 分鐘
+
 # 允許的影片副檔名
 ALLOWED_EXTENSIONS = {'mp4', 'webm', 'avi', 'mov', 'mkv', 'gif'}
 
@@ -71,6 +77,16 @@ async def _run_in_executor(fn, *args):
     """在執行緒池中執行同步函數"""
     loop = asyncio.get_event_loop()
     return await loop.run_in_executor(executor, partial(fn, *args))
+
+
+async def _schedule_cleanup(task_id: str):
+    """排程 10 分鐘後自動清理任務暫存檔"""
+    await asyncio.sleep(_CLEANUP_DELAY)
+    task = video_tasks.pop(task_id, None)
+    if task:
+        output_path = task.get("output_path")
+        if output_path and os.path.exists(output_path):
+            os.unlink(output_path)
 
 
 # ── 背景處理任務 ──
@@ -351,14 +367,20 @@ async def submit_compress(
         "error": None,
     }
 
-    # 在執行緒池中啟動背景處理
-    loop = asyncio.get_event_loop()
-    loop.run_in_executor(
-        executor,
-        _process_task,
-        task_id, input_path, params, target_kb,
-        output_format, include_audio, quality_preset, source_ext,
-    )
+    # 取得 semaphore 後才在執行緒池中啟動背景處理
+    async def _guarded_process():
+        async with _compress_semaphore:
+            loop = asyncio.get_event_loop()
+            await loop.run_in_executor(
+                executor,
+                _process_task,
+                task_id, input_path, params, target_kb,
+                output_format, include_audio, quality_preset, source_ext,
+            )
+        # 完成後排程 10 分鐘自動清理
+        asyncio.create_task(_schedule_cleanup(task_id))
+
+    asyncio.create_task(_guarded_process())
 
     return TaskSubmitResponse(
         task_id=task_id,

@@ -189,3 +189,41 @@ input[type="number"].input-vic:focus {
   outline: none;
   box-shadow: 0 0 0 1px #00B4FF;
 }
+
+/* 裁切框手把：透明擴展觸控區 (不改變定位上下文) */
+.crop-handle::before {
+  content: "";
+  position: absolute;
+  inset: -10px;
+}
+
+/* ── Mobile Adaptation (<768px) ── */
+
+@media (max-width: 767px) {
+  /* 主佈局：水平 → 垂直 */
+  .layout-editor {
+    flex-direction: column !important;
+  }
+
+  /* 側邊欄：改為底部面板 */
+  .layout-editor > aside {
+    width: 100% !important;
+    min-width: unset !important;
+    max-width: unset !important;
+    max-height: 45vh;
+    order: 2;
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+  }
+
+  /* 預覽區域：佔上方空間 */
+  .layout-editor > main {
+    flex: 1;
+    min-height: 0;
+    order: 1;
+  }
+
+  /* sidebar 內操作按鈕最小觸控尺寸 (排除裁切把手與預設小按鈕) */
+  .layout-editor > aside button:not(.crop-handle):not(.crop-ratio-btn) {
+    min-height: 44px;
+  }
+}

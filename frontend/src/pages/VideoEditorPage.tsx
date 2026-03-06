@@ -674,9 +674,9 @@ export function VideoEditorPage({ video, onExport, onReset, initialState }: Vide
   const { cropX, cropY, cropW, cropH } = transform.state;
 
   return (
-    <div className="h-screen flex overflow-hidden bg-sidebar">
+    <div className="h-screen flex overflow-hidden bg-sidebar layout-editor">
       {/* ── 左側面板 ── */}
-      <aside className="w-[30%] min-w-[240px] max-w-[320px] flex flex-col h-screen sidebar-scroll overflow-y-auto bg-sidebar">
+      <aside className="w-[30%] min-w-[240px] max-w-[320px] flex flex-col h-screen sidebar-scroll overflow-y-auto bg-sidebar max-md:h-auto">
         {/* Logo */}
         <div className="p-4 pb-2 mx-auto mb-6">
           <button onClick={() => setShowResetModal(true)} className="cursor-pointer">
@@ -883,7 +883,7 @@ export function VideoEditorPage({ video, onExport, onReset, initialState }: Vide
                     <button
                       key={label}
                       onClick={() => handleSetCropRatio(w, h)}
-                      className={`flex flex-col items-center justify-center gap-1.5 rounded-lg border transition-all active:scale-95
+                      className={`crop-ratio-btn flex flex-col items-center justify-center gap-1.5 rounded-lg border transition-all active:scale-95
                         ${selectedCropRatio === label
                           ? "border-[#00B4FF] bg-[#00B4FF]/20"
                           : "border-white/10 bg-white/5 hover:bg-[#00B4FF]/15 hover:border-[#00B4FF]/60"

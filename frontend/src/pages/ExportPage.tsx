@@ -459,9 +459,9 @@ export function ExportPage({
   };
 
   return (
-    <div className="h-screen flex overflow-hidden bg-sidebar">
+    <div className="h-screen flex overflow-hidden bg-sidebar layout-editor">
       {/* ===== 左側 Sidebar ===== */}
-      <aside className="w-[30%] min-w-[240px] max-w-[320px] flex flex-col h-screen sticky top-0 sidebar-scroll overflow-y-auto bg-sidebar">
+      <aside className="w-[30%] min-w-[240px] max-w-[320px] flex flex-col h-screen sticky top-0 sidebar-scroll overflow-y-auto bg-sidebar max-md:h-auto">
         {/* 頂部: 標題 */}
         <div className="p-4 pb-2 mx-auto mb-6">
           <button onClick={() => setShowResetModal(true)} className="cursor-pointer">

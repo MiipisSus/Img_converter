@@ -752,9 +752,9 @@ export function EditorPage({
   const currentFlipY = pipelineState.editorState.flipY;
 
   return (
-    <div className="h-screen flex overflow-hidden bg-sidebar">
+    <div className="h-screen flex overflow-hidden bg-sidebar layout-editor">
       {/* ===== 左側 Sidebar ===== */}
-      <aside className="w-[30%] min-w-[240px] max-w-[320px] flex flex-col h-screen sticky top-0 sidebar-scroll overflow-y-auto bg-sidebar">
+      <aside className="w-[30%] min-w-[240px] max-w-[320px] flex flex-col h-screen sticky top-0 sidebar-scroll overflow-y-auto bg-sidebar max-md:h-auto">
         {/* 頂部: 標題 */}
         <div className="p-4 pb-2 mx-auto mb-6">
           <button onClick={() => setShowResetModal(true)} className="cursor-pointer">
@@ -852,7 +852,7 @@ export function EditorPage({
         </div>
 
         {/* 縮圖列表 — 固定高度，含追加按鈕 */}
-        <div className={`h-[120px] shrink-0 w-full overflow-x-auto thumbnail-scroll px-5 py-2.5 flex items-center gap-3 transition-opacity ${mode === "crop" ? "opacity-40 pointer-events-none" : ""}`}>
+        <div className={`h-[120px] max-md:h-[80px] shrink-0 w-full overflow-x-auto thumbnail-scroll px-3 py-1.5 max-md:px-2 flex items-center gap-2 max-md:gap-1.5 transition-opacity ${mode === "crop" ? "opacity-40 pointer-events-none" : ""}`}>
           {/* 追加圖片按鈕 (固定最左側) */}
           <button
             onClick={() => appendInputRef.current?.click()}
@@ -1101,7 +1101,7 @@ function CropControlPanel({
               <button
                 key={label}
                 onClick={() => onSetCropRatio(w, h)}
-                className="flex flex-col items-center justify-center gap-1.5 rounded-lg border border-white/10 bg-white/5 transition-all
+                className="crop-ratio-btn flex flex-col items-center justify-center gap-1.5 rounded-lg border border-white/10 bg-white/5 transition-all
                   hover:bg-highlight/15 hover:border-highlight/60 active:scale-95"
                 style={{ aspectRatio: "1 / 1" }}
               >
