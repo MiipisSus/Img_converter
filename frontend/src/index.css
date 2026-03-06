@@ -226,4 +226,12 @@ input[type="number"].input-vic:focus {
   .layout-editor > aside button:not(.crop-handle):not(.crop-ratio-btn) {
     min-height: 44px;
   }
+
+  /* 裁切比例按鈕：取消正方形，改為緊湊橫排 */
+  .crop-ratio-btn {
+    aspect-ratio: unset !important;
+    flex-direction: row !important;
+    gap: 8px !important;
+    padding: 10px 0 !important;
+  }
 }
