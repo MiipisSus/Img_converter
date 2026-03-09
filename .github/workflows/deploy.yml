@@ -22,7 +22,6 @@ jobs:
           key: ${{ secrets.GCP_SSH_KEY }}
           envs: PROJECT_DIR
           # 關鍵修正：增加 ssh-agent 轉發，確保 VM 內的 git clone 能用 secrets 的金鑰存取 GitHub
-          script_stop: true # 遇到錯誤立即停止，避免執行壞掉的指令
           script: |
             # 1. 確保目錄存在並處理權限
             # 加上 -p 確保父目錄存在，並確保目前使用者有權限寫入
