@@ -6,6 +6,9 @@ import { ExportPage } from "./pages/ExportPage";
 import { VideoEditorPage } from "./pages/VideoEditorPage";
 import { VideoExportPage } from "./pages/VideoExportPage";
 
+import picFavicon from "./assets/pic_favicon.png";
+import vicFavicon from "./assets/vic_favicon.png";
+
 /** 應用模式：上傳頁 / 圖片流程 / 影片流程 */
 type AppMode = "upload" | "pic" | "vic";
 
@@ -38,6 +41,14 @@ function App() {
     () => images.find((i) => i.id === activeImageId) ?? null,
     [images, activeImageId],
   );
+
+  // ── 根據模式切換 favicon ──
+  useEffect(() => {
+    const link = document.querySelector<HTMLLinkElement>("link[rel='icon']");
+    if (link) {
+      link.href = mode === "vic" ? vicFavicon : picFavicon;
+    }
+  }, [mode]);
 
   // ── 橋接 imageRef ──
   const imageRef = useRef<HTMLImageElement | null>(null);
