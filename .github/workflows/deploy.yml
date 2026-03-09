@@ -21,33 +21,41 @@ jobs:
           echo "${{ secrets.GCP_SSH_KEY }}" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
           
-          # 2. 將 GCP VM 加入已知主機，防止 Host verification 錯誤
+          # 2. 掃描 Host Key 避免連線中斷
           ssh-keyscan -H ${{ secrets.GCP_HOST }} >> ~/.ssh/known_hosts
           
-          # 3. 透過原生 SSH 執行部署指令
-          # 注意：我們使用 -i 指定剛剛產生的 id_rsa
-          ssh -i ~/.ssh/id_rsa ${{ secrets.GCP_USER }}@${{ secrets.GCP_HOST }} << 'EOF'
-            set -e  # 遇到錯誤立即停止
+          # 3. 執行遠端指令 (改用更明確的引號處理)
+          ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no ${{ secrets.GCP_USER }}@${{ secrets.GCP_HOST }} << 'EOF'
+            set -e
             
-            # 確保目錄存在並處理權限
-            sudo mkdir -p ${{ env.PROJECT_DIR }}
-            sudo chown -R $USER:$USER ${{ env.PROJECT_DIR }}
+            # 定義變數 (在遠端執行環境中)
+            PROJECT_DIR="/opt/img_convert"
+            
+            echo "--- Starting Deployment on VM ---"
+            
+            # 確保目錄權限
+            sudo mkdir -p $PROJECT_DIR
+            sudo chown -R $USER:$USER $PROJECT_DIR
 
             # 處理 Git 操作
-            if [ -d "${{ env.PROJECT_DIR }}/.git" ]; then
-              cd ${{ env.PROJECT_DIR }}
+            if [ -d "$PROJECT_DIR/.git" ]; then
+              cd $PROJECT_DIR
               git reset --hard HEAD
               git pull origin main
             else
+              # 確保 VM 能認得 GitHub
               ssh-keyscan -t rsa github.com >> ~/.ssh/known_hosts
-              git clone --branch main --single-branch git@github.com:MiipisSus/Img_converter.git ${{ env.PROJECT_DIR }}
-              cd ${{ env.PROJECT_DIR }}
+              git clone --branch main --single-branch git@github.com:MiipisSus/Img_converter.git $PROJECT_DIR
+              cd $PROJECT_DIR
             fi
 
             # Docker 部署
+            echo "--- Restarting Containers ---"
             docker compose down --remove-orphans
             docker compose up --build -d
             
-            # 清理沒在用的 image
+            # 清理
             docker image prune -f
+            
+            echo "--- Deployment Finished Successfully ---"
           EOF
