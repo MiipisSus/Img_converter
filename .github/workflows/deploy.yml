@@ -42,4 +42,7 @@ jobs:
 
             docker image prune -f
 
+            echo "--- Reloading Nginx ---"
+            sudo nginx -t && sudo systemctl reload nginx
+
             echo "--- Deployment Finished ---"
