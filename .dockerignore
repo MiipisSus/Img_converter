@@ -1,0 +1,17 @@
+node_modules
+frontend/node_modules
+frontend/dist
+__pycache__
+**/__pycache__
+*.pyc
+.git
+.gitignore
+.env
+.venv
+venv
+uploads/
+*.md
+tests/
+.pytest_cache
+.mypy_cache
+.DS_Store
