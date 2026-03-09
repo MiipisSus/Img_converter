@@ -14,38 +14,40 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Deploy via SSH
-        uses: appleboy/ssh-action@v1
-        with:
-          host: ${{ secrets.GCP_HOST }}
-          username: ${{ secrets.GCP_USER }}
-          key: ${{ secrets.GCP_SSH_KEY }}
-          envs: PROJECT_DIR
-          # 關鍵修正：增加 ssh-agent 轉發，確保 VM 內的 git clone 能用 secrets 的金鑰存取 GitHub
-          script: |
-            # 1. 確保目錄存在並處理權限
-            # 加上 -p 確保父目錄存在，並確保目前使用者有權限寫入
-            sudo mkdir -p $PROJECT_DIR
-            sudo chown -R $USER:$USER $PROJECT_DIR
+      - name: Setup SSH and Deploy
+        run: |
+          # 1. 建立 SSH 目錄並寫入私鑰
+          mkdir -p ~/.ssh
+          echo "${{ secrets.GCP_SSH_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          
+          # 2. 將 GCP VM 加入已知主機，防止 Host verification 錯誤
+          ssh-keyscan -H ${{ secrets.GCP_HOST }} >> ~/.ssh/known_hosts
+          
+          # 3. 透過原生 SSH 執行部署指令
+          # 注意：我們使用 -i 指定剛剛產生的 id_rsa
+          ssh -i ~/.ssh/id_rsa ${{ secrets.GCP_USER }}@${{ secrets.GCP_HOST }} << 'EOF'
+            set -e  # 遇到錯誤立即停止
+            
+            # 確保目錄存在並處理權限
+            sudo mkdir -p ${{ env.PROJECT_DIR }}
+            sudo chown -R $USER:$USER ${{ env.PROJECT_DIR }}
 
-            # 2. 處理私有 Repo 的 Git 操作
-            if [ -d "$PROJECT_DIR/.git" ]; then
-              cd $PROJECT_DIR
-              # 清除可能的衝突並拉取
+            # 處理 Git 操作
+            if [ -d "${{ env.PROJECT_DIR }}/.git" ]; then
+              cd ${{ env.PROJECT_DIR }}
               git reset --hard HEAD
               git pull origin main
             else
-              # 第一次 clone：確保 VM 已經把 github.com 加入 known_hosts
               ssh-keyscan -t rsa github.com >> ~/.ssh/known_hosts
-              git clone --branch main --single-branch git@github.com:MiipisSus/Img_converter.git $PROJECT_DIR
-              cd $PROJECT_DIR
+              git clone --branch main --single-branch git@github.com:MiipisSus/Img_converter.git ${{ env.PROJECT_DIR }}
+              cd ${{ env.PROJECT_DIR }}
             fi
 
-            # 3. Docker 部署
-            # 使用 --remove-orphans 確保清理掉舊的、不在 compose 裡的容器
+            # Docker 部署
             docker compose down --remove-orphans
             docker compose up --build -d
-
-            # 4. 資源管理
-            # 清理沒在用的 image 避免 20GB 的硬碟很快被填滿
+            
+            # 清理沒在用的 image
             docker image prune -f
+          EOF
