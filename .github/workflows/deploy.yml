@@ -28,8 +28,8 @@ jobs:
 
             if [ -d "$PROJECT_DIR/.git" ]; then
               cd $PROJECT_DIR
-              git reset --hard HEAD
-              git pull origin main
+              git fetch origin main
+              git reset --hard origin/main
             else
               ssh-keyscan -t rsa github.com >> ~/.ssh/known_hosts
               git clone --branch main --single-branch git@github.com:MiipisSus/Img_converter.git $PROJECT_DIR
