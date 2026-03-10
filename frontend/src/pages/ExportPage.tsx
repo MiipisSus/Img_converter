@@ -5,6 +5,7 @@ import { generateCroppedImage } from "../utils/generateCroppedImage";
 import { getCroppedOriginalSize } from "../utils/containerParams";
 import type { OutputSettings, ImageItem, ExportFormat } from "../types";
 import logoImg from "../assets/pic_logo.png";
+import picFavicon from "../assets/pic_favicon.png";
 import { ConfirmModal } from "../components/ConfirmModal";
 
 interface ExportPageProps {
@@ -364,7 +365,12 @@ export function ExportPage({
   // ── 下載邏輯 (即時生成 blob，帶正確輸出格式) ──
   const [isDownloading, setIsDownloading] = useState(false);
   // 長按儲存 fallback modal
-  const [saveHintImage, setSaveHintImage] = useState<{ url: string; filename: string } | null>(null);
+  /** 手機端：儲存至相簿 Modal 的圖片列表 */
+  const [albumImages, setAlbumImages] = useState<{ url: string; filename: string }[]>([]);
+  /** 手機端：分流選單 — 暫存已生成的結果供選擇後使用 */
+  const [mobileMenu, setMobileMenu] = useState<{
+    allResults: { blob: Blob; ext: string; mime: string }[];
+  } | null>(null);
 
   /** 桌面端下載：建立 <a> 觸發瀏覽器下載 */
   const triggerDownload = useCallback((blob: Blob, filename: string) => {
@@ -400,7 +406,6 @@ export function ExportPage({
     setIsDownloading(true);
     try {
       const imgs = imagesRef.current;
-      const isMulti = imgs.length > 1;
       const os = outputSettingsRef.current;
       const isPdf = downloadFormatRef.current === "pdf";
       const currentPdfMode = pdfModeRef.current;
@@ -450,32 +455,7 @@ export function ExportPage({
         }),
       );
 
-      if (!isMulti && !isPdf) {
-        // ── 單圖 ──
-        const { blob, ext, mime } = allResults[0];
-        const filename = `processed-image.${ext}`;
-
-        if (await tryShare(blob, filename, mime)) return;
-
-        if (isMobile) {
-          const url = URL.createObjectURL(blob);
-          setSaveHintImage({ url, filename });
-        } else {
-          triggerDownload(blob, filename);
-        }
-      } else if (!isPdf) {
-        // ── 多圖 ZIP ──
-        const JSZip = (await import("jszip")).default;
-        const zip = new JSZip();
-        allResults.forEach(({ blob, ext }, i) => {
-          zip.file(`image-${i + 1}.${ext}`, blob);
-        });
-        const zipBlob = await zip.generateAsync({ type: "blob" });
-        const filename = "images.zip";
-
-        if (await tryShare(zipBlob, filename, "application/zip")) return;
-        triggerDownload(zipBlob, filename);
-      } else {
+      if (isPdf) {
         // ── PDF ──
         const { exportPdf } = await import("../api/exportPdf");
         const pdfBlob = await exportPdf({
@@ -500,12 +480,81 @@ export function ExportPage({
         } else {
           triggerDownload(pdfBlob, filename);
         }
+      } else {
+        // ── 圖片 (單圖/多圖) ──
+        if (isMobile) {
+          // 手機端：彈出分流選單，讓使用者選擇儲存方式
+          setMobileMenu({ allResults });
+          return; // 不進 finally 的 setIsDownloading(false)，由選單按鈕自行處理
+        }
+
+        // 桌面端：單圖直接下載，多圖打 ZIP
+        if (allResults.length === 1) {
+          const { blob, ext, mime } = allResults[0];
+          const filename = `processed-image.${ext}`;
+          if (await tryShare(blob, filename, mime)) return;
+          triggerDownload(blob, filename);
+        } else {
+          const JSZip = (await import("jszip")).default;
+          const zip = new JSZip();
+          allResults.forEach(({ blob, ext }, i) => {
+            zip.file(`image-${i + 1}.${ext}`, blob);
+          });
+          const zipBlob = await zip.generateAsync({ type: "blob" });
+          triggerDownload(zipBlob, "images.zip");
+        }
       }
     } catch (err) {
       console.error("匯出失敗:", err);
     } finally {
       setIsDownloading(false);
     }
+  };
+
+  /** 手機分流：儲存至檔案 (ZIP / 單檔下載) */
+  const handleMobileSaveToFile = async () => {
+    if (!mobileMenu) return;
+    const { allResults } = mobileMenu;
+    setMobileMenu(null);
+    try {
+      if (allResults.length === 1) {
+        const { blob, ext, mime } = allResults[0];
+        const filename = `processed-image.${ext}`;
+        if (await tryShare(blob, filename, mime)) return;
+        triggerDownload(blob, filename);
+      } else {
+        const JSZip = (await import("jszip")).default;
+        const zip = new JSZip();
+        allResults.forEach(({ blob, ext }, i) => {
+          zip.file(`image-${i + 1}.${ext}`, blob);
+        });
+        const zipBlob = await zip.generateAsync({ type: "blob" });
+        const filename = "images.zip";
+        if (await tryShare(zipBlob, filename, "application/zip")) return;
+        triggerDownload(zipBlob, filename);
+      }
+    } finally {
+      setIsDownloading(false);
+    }
+  };
+
+  /** 手機分流：儲存至相簿 (開啟長按儲存 Modal) */
+  const handleMobileSaveToAlbum = () => {
+    if (!mobileMenu) return;
+    const { allResults } = mobileMenu;
+    setMobileMenu(null);
+    const imgs = allResults.map(({ blob, ext }, i) => ({
+      url: URL.createObjectURL(blob),
+      filename: allResults.length === 1 ? `processed-image.${ext}` : `image-${i + 1}.${ext}`,
+    }));
+    setAlbumImages(imgs);
+    setIsDownloading(false);
+  };
+
+  /** 關閉相簿 Modal 並清理 blob URLs */
+  const closeAlbumModal = () => {
+    albumImages.forEach((img) => URL.revokeObjectURL(img.url));
+    setAlbumImages([]);
   };
 
   return (
@@ -648,32 +697,77 @@ export function ExportPage({
         )}
       </main>
 
-      {/* 長按儲存提示 Modal (觸控裝置 fallback) */}
-      {saveHintImage && (
+      {/* 手機端分流選單 */}
+      {mobileMenu && (
         <div
-          className="fixed inset-0 z-[9999] bg-black/70 flex items-center justify-center p-6"
-          onClick={() => {
-            URL.revokeObjectURL(saveHintImage.url);
-            setSaveHintImage(null);
-          }}
+          className="fixed inset-0 z-[9999] bg-black/70 flex items-end justify-center"
+          onClick={() => { setMobileMenu(null); setIsDownloading(false); }}
         >
           <div
-            className="bg-[#1e1e1e] rounded-2xl p-4 max-w-sm w-full flex flex-col items-center gap-3"
+            className="w-full max-w-sm mb-8 mx-4 flex flex-col gap-2 animate-slide-up"
             onClick={(e) => e.stopPropagation()}
           >
-            <p className="text-white/90 text-sm text-center">長按下方圖片以儲存</p>
-            <img
-              src={saveHintImage.url}
-              alt={saveHintImage.filename}
-              className="max-w-full max-h-[60vh] rounded-lg"
-            />
-            <p className="text-white/50 text-xs">{saveHintImage.filename}</p>
+            <div className="bg-[#2a2a2a] rounded-2xl overflow-hidden">
+              <button
+                onClick={handleMobileSaveToAlbum}
+                className="w-full px-4 py-4 text-white text-base font-medium border-b border-white/10 active:bg-white/10"
+              >
+                儲存至相簿
+              </button>
+              <button
+                onClick={handleMobileSaveToFile}
+                className="w-full px-4 py-4 text-white text-base font-medium active:bg-white/10"
+              >
+                {mobileMenu.allResults.length > 1 ? "儲存至檔案 (ZIP)" : "儲存至檔案"}
+              </button>
+            </div>
             <button
-              onClick={() => {
-                URL.revokeObjectURL(saveHintImage.url);
-                setSaveHintImage(null);
-              }}
-              className="mt-1 px-6 py-2 bg-white/10 text-white/80 rounded-lg text-sm"
+              onClick={() => { setMobileMenu(null); setIsDownloading(false); }}
+              className="w-full px-4 py-4 bg-[#2a2a2a] rounded-2xl text-white/60 text-base font-medium active:bg-white/10"
+            >
+              取消
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* 儲存至相簿 Modal */}
+      {albumImages.length > 0 && (
+        <div className="fixed inset-0 z-[9999] bg-black/90 flex flex-col">
+          {/* 頂部提示 + 關閉 */}
+          <div className="shrink-0 flex items-center justify-between px-4 py-3 border-b border-white/10">
+            <p className="text-white/90 text-sm flex items-center gap-1.5">
+              <img src={picFavicon} alt="" className="w-5 h-5" />
+              長按圖片即可儲存至相片圖庫
+            </p>
+            <button
+              onClick={closeAlbumModal}
+              className="px-4 py-2 text-white/60 text-sm active:text-white"
+            >
+              關閉
+            </button>
+          </div>
+
+          {/* 圖片列表 (垂直滾動) */}
+          <div className="flex-1 overflow-y-auto p-4">
+            <div className="flex flex-col items-center gap-4 max-w-lg mx-auto">
+              {albumImages.map((img, i) => (
+                <img
+                  key={i}
+                  src={img.url}
+                  alt=""
+                  className="max-w-full rounded-lg"
+                  style={{ maxHeight: "70vh" }}
+                />
+              ))}
+            </div>
+          </div>
+
+          {/* 底部關閉按鈕 */}
+          <div className="shrink-0 px-4 py-4 border-t border-white/10 flex justify-center">
+            <button
+              onClick={closeAlbumModal}
+              className="px-8 py-3 bg-white/10 text-white/80 rounded-xl text-sm font-medium active:bg-white/20"
             >
               關閉
             </button>
