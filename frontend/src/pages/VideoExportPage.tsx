@@ -929,6 +929,7 @@ export function VideoExportPage({
                   : {
                       maxWidth: "100%",
                       maxHeight: "100%",
+                      objectFit: "contain" as const,
                       transform: [previewTransform, resolutionScale < 1 ? `scale(${resolutionScale})` : ""].filter(Boolean).join(" ") || undefined,
                       transition: "transform 0.3s ease",
                     }

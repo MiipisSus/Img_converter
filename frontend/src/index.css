@@ -34,6 +34,52 @@ input[type="range"].slider-dark::-moz-range-thumb {
   box-shadow: 0 0 4px rgba(0, 0, 0, 0.3);
 }
 
+/* Video system range slider (blue) */
+input[type="range"].slider-vic {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 6px;
+  background: #747474;
+  border-radius: 3px;
+  outline: none;
+}
+
+input[type="range"].slider-vic::-webkit-slider-runnable-track {
+  height: 6px;
+  background: #747474;
+  border-radius: 3px;
+}
+
+input[type="range"].slider-vic::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  background: #00B4FF;
+  border-radius: 50%;
+  cursor: pointer;
+  border: none;
+  box-shadow: 0 0 4px rgba(0, 0, 0, 0.3);
+  margin-top: -5px;
+}
+
+input[type="range"].slider-vic::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  background: #00B4FF;
+  border-radius: 50%;
+  cursor: pointer;
+  border: none;
+  box-shadow: 0 0 4px rgba(0, 0, 0, 0.3);
+}
+
+input[type="range"].slider-vic::-moz-range-track {
+  height: 6px;
+  background: #747474;
+  border-radius: 3px;
+  border: none;
+}
+
 /* Sidebar scrollbar */
 .sidebar-scroll::-webkit-scrollbar {
   width: 4px;
