@@ -52,15 +52,31 @@ input[type="range"].slider-dark::-moz-range-thumb {
   background: rgba(255, 255, 255, 0.35);
 }
 
-/* Highlight glow on hover */
-.btn-highlight:hover {
-  box-shadow: 0 0 14px rgba(212, 255, 63, 0.45);
+/* 所有按鈕：消除 300ms 觸控延遲 + 按下回饋 */
+button, a, [role="button"] {
+  touch-action: manipulation;
 }
 
-/* White glow on hover */
-.btn-white:hover {
-  box-shadow: 0 0 14px rgba(255, 255, 255, 0.45);
+button:active:not(:disabled) {
+  transform: scale(0.95);
+  opacity: 0.8;
 }
+
+/* hover 效果僅在有游標的裝置上生效，避免觸控裝置需雙擊 */
+@media (hover: hover) {
+  .btn-highlight:hover {
+    box-shadow: 0 0 14px rgba(212, 255, 63, 0.45);
+  }
+
+  .btn-white:hover {
+    box-shadow: 0 0 14px rgba(255, 255, 255, 0.45);
+  }
+
+  .btn-vic:hover {
+    box-shadow: 0 0 14px rgba(0, 180, 255, 0.45);
+  }
+}
+
 
 /* Video trim double range slider — filmstrip style */
 .trim-slider {
@@ -158,10 +174,6 @@ input[type="range"].slider-dark::-moz-range-thumb {
   box-shadow: 0 0 4px rgba(255, 255, 255, 0.5);
 }
 
-/* Blue glow on hover */
-.btn-vic:hover {
-  box-shadow: 0 0 14px rgba(0, 180, 255, 0.45);
-}
 
 /* Number input in dark theme */
 input[type="number"].input-dark {
@@ -188,6 +200,17 @@ input[type="number"].input-vic:focus {
   border-color: #00B4FF;
   outline: none;
   box-shadow: 0 0 0 1px #00B4FF;
+}
+
+/* 縮圖刪除按鈕：桌面用 hover 顯示，觸控裝置常駐 */
+@media (hover: hover) {
+  .thumb-remove {
+    opacity: 0;
+    transition: opacity 0.15s;
+  }
+  .group:hover .thumb-remove {
+    opacity: 1;
+  }
 }
 
 /* 裁切框手把：透明擴展觸控區 (不改變定位上下文) */

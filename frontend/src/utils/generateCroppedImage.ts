@@ -9,6 +9,8 @@ export interface CropOptions {
   targetWidth?: number
   /** 目標高度 (可選，用於縮放) */
   targetHeight?: number
+  /** 跳過 toDataURL (僅需 blob 時使用，避免阻塞主線程) */
+  skipDataUrl?: boolean
 }
 
 export interface CropResult {
@@ -52,7 +54,7 @@ export async function generateCroppedImage(
   imageInfo: ImageInfo,
   options: CropOptions = {}
 ): Promise<CropResult> {
-  const { format = 'image/png', quality = 0.92, targetWidth, targetHeight } = options
+  const { format = 'image/png', quality = 0.92, targetWidth, targetHeight, skipDataUrl = false } = options
   const {
     imageX,
     imageY,
@@ -151,7 +153,7 @@ export async function generateCroppedImage(
     )
   })
 
-  const dataUrl = finalCanvas.toDataURL(format, quality)
+  const dataUrl = skipDataUrl ? '' : finalCanvas.toDataURL(format, quality)
 
   return {
     blob,

@@ -722,6 +722,8 @@ export function EditorPage({
     if (!imageRef.current || isExporting) return;
 
     setIsExporting(true);
+    // 讓瀏覽器先完成 UI 更新 (顯示 loading)，再執行耗時的 canvas 運算
+    await new Promise((r) => setTimeout(r, 0));
     try {
       const { editorState, imageInfo } = pipelineState;
 
@@ -802,9 +804,9 @@ export function EditorPage({
             <button
               onClick={handleEnterOutputMode}
               disabled={isExporting}
-              className="w-full px-4 py-3 bg-highlight text-black font-bold rounded-[10px] transition-all btn-highlight disabled:opacity-30"
+              className="w-full px-4 py-3 bg-highlight text-black font-bold rounded-[10px] transition-all btn-highlight disabled:opacity-50"
             >
-              導出圖片
+              {isExporting ? "處理中..." : "導出圖片"}
             </button>
           )}
           {mode === "preview" && (
@@ -887,7 +889,7 @@ export function EditorPage({
               className={`group relative shrink-0 w-16 h-16 rounded-lg overflow-hidden border-2 transition-colors ${
                 item.id === activeImageId
                   ? "border-highlight"
-                  : "border-transparent hover:border-white/30"
+                  : "border-transparent"
               }`}
             >
               <img
@@ -897,7 +899,7 @@ export function EditorPage({
               />
               <button
                 onClick={(e) => { e.stopPropagation(); onRemoveImage(item.id); }}
-                className="absolute top-0 right-0 w-5 h-5 flex items-center justify-center bg-black/70 text-white/80 hover:text-white text-xs rounded-bl-md opacity-0 group-hover:opacity-100 transition-opacity"
+                className="absolute top-0 right-0 w-5 h-5 flex items-center justify-center bg-black/70 text-white/80 text-xs rounded-bl-md thumb-remove"
               >
                 &times;
               </button>
