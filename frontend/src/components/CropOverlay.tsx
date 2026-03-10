@@ -76,12 +76,12 @@ export function CropOverlay({
         {(["nw", "ne", "sw", "se"] as const).map((handle) => (
           <div
             key={handle}
-            className="absolute w-4 h-4 pointer-events-auto crop-handle"
+            className="absolute w-5 h-5 pointer-events-auto crop-handle"
             style={{
-              top: handle.includes("n") ? -8 : "auto",
-              bottom: handle.includes("s") ? -8 : "auto",
-              left: handle.includes("w") ? -8 : "auto",
-              right: handle.includes("e") ? -8 : "auto",
+              top: handle.includes("n") ? -10 : "auto",
+              bottom: handle.includes("s") ? -10 : "auto",
+              left: handle.includes("w") ? -10 : "auto",
+              right: handle.includes("e") ? -10 : "auto",
               cursor:
                 handle === "nw" || handle === "se"
                   ? "nwse-resize"
@@ -103,35 +103,35 @@ export function CropOverlay({
               backgroundColor: "#00B4FF",
               borderRadius: 3,
               ...(handle === "n" && {
-                top: -3,
+                top: -4,
                 left: "50%",
                 transform: "translateX(-50%)",
-                width: 30,
-                height: 6,
+                width: 36,
+                height: 8,
                 cursor: "ns-resize",
               }),
               ...(handle === "s" && {
-                bottom: -3,
+                bottom: -4,
                 left: "50%",
                 transform: "translateX(-50%)",
-                width: 30,
-                height: 6,
+                width: 36,
+                height: 8,
                 cursor: "ns-resize",
               }),
               ...(handle === "w" && {
-                left: -3,
+                left: -4,
                 top: "50%",
                 transform: "translateY(-50%)",
-                width: 6,
-                height: 30,
+                width: 8,
+                height: 36,
                 cursor: "ew-resize",
               }),
               ...(handle === "e" && {
-                right: -3,
+                right: -4,
                 top: "50%",
                 transform: "translateY(-50%)",
-                width: 6,
-                height: 30,
+                width: 8,
+                height: 36,
                 cursor: "ew-resize",
               }),
             }}

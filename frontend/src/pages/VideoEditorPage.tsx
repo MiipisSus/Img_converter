@@ -327,6 +327,23 @@ export function VideoEditorPage({ video, onExport, onReset, initialState }: Vide
   // 剪輯模式 — 統一的時間 + 空間操作
   // ─────────────────────────────────────────────
 
+  // ── 根據預覽區實際大小計算裁切容器尺寸 ──
+  const recalcCropContainer = useCallback((vW: number, vH: number) => {
+    const el = clipAreaRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    const isMobileView = window.innerWidth < 768;
+    // 時間軸實際高度：TrimSlider(48) + padding + gap + 播放按鈕列(36)
+    const timelineReserve = isMobileView ? 110 : 120;
+    const availW = rect.width - (isMobileView ? 16 : 0);
+    const availH = rect.height - timelineReserve;
+
+    const M = Math.min(availW / vW, availH / vH);
+    const cW = Math.round(vW * M);
+    const cH = Math.round(vH * M);
+    setCropContainerSize({ width: cW, height: cH });
+  }, []);
+
   // ── 進入剪輯模式 ──
   const handleEnterClip = useCallback(() => {
     if (!videoInfo) return;
@@ -339,21 +356,23 @@ export function VideoEditorPage({ video, onExport, onReset, initialState }: Vide
     const vH = (vid && vid.videoHeight > 0) ? vid.videoHeight : videoInfo.height;
     setIntrinsicVideoSize({ w: vW, h: vH });
 
-    // 測量可用空間（扣除底部時間軸約 100px）
-    // 使用 intrinsic 尺寸計算，確保與 hook 的 displayMultiplier 一致
-    const rect = el.getBoundingClientRect();
-    const availW = rect.width;
-    const availH = rect.height - 100;
-
-    const M = Math.min(availW / vW, availH / vH);
-    const cW = Math.round(vW * M);
-    const cH = Math.round(vH * M);
-
-    setCropContainerSize({ width: cW, height: cH });
+    // 先用當前佈局計算初始尺寸
+    recalcCropContainer(vW, vH);
     setMode("clip");
     // 注意：不在此處 seek — 因為 setMode 會觸發 video 元素重建，
     // seek 和 play 在 mode-change useEffect 中處理（新元素已掛載）
-  }, [videoInfo]);
+  }, [videoInfo, recalcCropContainer]);
+
+  // ── mode 變為 clip 後，等佈局穩定再重新測量容器 ──
+  useEffect(() => {
+    if (mode !== "clip" || !intrinsicVideoSize) return;
+    // 等 clip-mode CSS 生效後重新測量
+    const raf = requestAnimationFrame(() => {
+      recalcCropContainer(intrinsicVideoSize.w, intrinsicVideoSize.h);
+    });
+    return () => cancelAnimationFrame(raf);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode]);
 
   // 進入 clip 模式後：恢復已儲存的狀態 或 完整重置
   const prevModeRef = useRef<EditorMode>("default");
@@ -746,7 +765,7 @@ export function VideoEditorPage({ video, onExport, onReset, initialState }: Vide
   const { cropX, cropY, cropW, cropH } = transform.state;
 
   return (
-    <div className="h-[100dvh] flex overflow-hidden bg-sidebar layout-editor">
+    <div className={`h-[100dvh] flex overflow-hidden bg-sidebar layout-editor${mode === "clip" ? " clip-mode" : ""}`}>
       {/* 手機版 Header (Logo) */}
       <header className="hidden max-md:flex items-center justify-center bg-sidebar px-4 py-2">
         <button onClick={() => setShowResetModal(true)} className="cursor-pointer">
@@ -1050,11 +1069,12 @@ export function VideoEditorPage({ video, onExport, onReset, initialState }: Vide
 
       {/* ── 右側主要內容 ── */}
       <main className="flex-1 flex flex-col h-[100dvh]">
-        <div ref={clipAreaRef} className="flex-1 bg-preview/5 flex flex-col items-center justify-center m-4 mb-0 rounded-lg overflow-hidden relative">
+        <div ref={clipAreaRef} className="flex-1 bg-preview/5 flex flex-col items-center justify-center m-4 max-md:m-2 mb-0 rounded-lg overflow-hidden relative">
           {mode === "clip" && videoInfo ? (
             /* ── 剪輯工作區：上方裁切預覽 + 下方時間軸 ── */
             <>
-              {/* 裁切預覽區 */}
+              {/* 裁切預覽區 — flex-1 佔滿剩餘空間，內部置中 */}
+              <div className="flex-1 min-h-0 flex items-center justify-center w-full">
               <div
                 className="relative select-none flex-shrink-0"
                 style={{
@@ -1099,10 +1119,11 @@ export function VideoEditorPage({ video, onExport, onReset, initialState }: Vide
                   />
                 </div>
               </div>
+              </div>
 
               {/* 時間軸 — 緊接在裁切預覽下方 */}
               {duration > 0 && (
-                <div className="w-full shrink-0 px-6 pt-4 pb-2 flex flex-col gap-3">
+                <div className="w-full shrink-0 px-6 max-md:px-3 pt-4 max-md:pt-2 pb-2 max-md:pb-1 flex flex-col gap-3 max-md:gap-2">
                   <TrimSlider
                     duration={duration}
                     startT={startT}
