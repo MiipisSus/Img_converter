@@ -267,9 +267,13 @@ export function ExportPage({
   const [realSizes, setRealSizes] = useState<Record<string, number>>({});
   const [isEstimating, setIsEstimating] = useState(false);
 
-  // 當格式/品質變更時，清除過期的真實大小
+  // 當格式/品質變更時，清除過期的真實大小並重新估算
   useEffect(() => {
-    setRealSizes((prev) => (Object.keys(prev).length > 0 ? {} : prev));
+    setRealSizes({});
+    setIsEstimating(true);
+    const timer = setTimeout(() => handleBatchEstimateRef.current(), 16);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [outputSettings.format, outputSettings.quality]);
 
   // 合併：真實大小優先，否則使用數學估算
@@ -285,9 +289,12 @@ export function ExportPage({
 
   // 批量預估：為所有圖片生成 blob 以取得精確大小 (含 targetKB 二分搜尋)
   // 所有外部狀態皆從 ref 讀取，避免 setTimeout 觸發時的 stale closure
+  const estimatingLockRef = useRef(false);
   const handleBatchEstimate = async () => {
-    if (isEstimating) return;
+    if (estimatingLockRef.current) return;
+    estimatingLockRef.current = true;
     setIsEstimating(true);
+    await new Promise((r) => setTimeout(r, 0));
     try {
       const os = outputSettingsRef.current;
       const imgs = imagesRef.current;
@@ -312,6 +319,8 @@ export function ExportPage({
 
       const newRealSizes: Record<string, number> = {};
       for (const img of imgs) {
+        // 每張圖前讓出主線程，確保 UI 保持響應
+        await new Promise((r) => setTimeout(r, 0));
         const cs = getCroppedOriginalSize(
           img.pipelineState.editorState,
           img.pipelineState.imageInfo,
@@ -338,6 +347,7 @@ export function ExportPage({
     } catch (err) {
       console.error("批量預估失敗:", err);
     } finally {
+      estimatingLockRef.current = false;
       setIsEstimating(false);
     }
   };
@@ -357,6 +367,7 @@ export function ExportPage({
   const handleDownload = async () => {
     if (isDownloading) return;
     setIsDownloading(true);
+    await new Promise((r) => setTimeout(r, 0));
     try {
       const imgs = imagesRef.current;
       const isMulti = imgs.length > 1;
@@ -482,11 +493,18 @@ export function ExportPage({
             isEstimating={isEstimating}
             onBatchEstimate={handleBatchEstimate}
             downloadFormat={downloadFormat}
-            onDownloadFormatChange={setDownloadFormat}
+            onDownloadFormatChange={(val) => {
+              setDownloadFormat(val);
+              setRealSizes({});
+              setIsEstimating(true);
+              setTimeout(() => handleBatchEstimateRef.current(), 16);
+            }}
             pdfMode={pdfMode}
             onPdfModeChange={(mode: "high" | "standard") => {
               setPdfMode(mode);
-              setTimeout(() => handleBatchEstimateRef.current(), 0);
+              setRealSizes({});
+              setIsEstimating(true);
+              setTimeout(() => handleBatchEstimateRef.current(), 16);
             }}
             targetKBScope={targetKBScope}
             onTargetKBScopeChange={handleSetTargetKBScope}
@@ -553,7 +571,7 @@ export function ExportPage({
                   className={`relative shrink-0 w-16 h-16 rounded-lg overflow-hidden border-2 transition-colors ${
                     item.id === activeImageId
                       ? "border-highlight"
-                      : "border-transparent hover:border-white/30"
+                      : "border-transparent"
                   }`}
                 >
                   <img
@@ -745,10 +763,7 @@ function OutputSettingsPanel({
           ).map(([val, label]) => (
             <button
               key={val}
-              onClick={() => {
-                onDownloadFormatChange(val);
-                setTimeout(() => onBatchEstimate(), 0);
-              }}
+              onClick={() => onDownloadFormatChange(val)}
               className={`flex-1 px-2 py-1.5 text-sm rounded-[10px] transition-colors ${
                 downloadFormat === val
                   ? "bg-highlight text-black font-medium"
@@ -925,10 +940,7 @@ function OutputSettingsPanel({
               return (
                 <button
                   key={fmt}
-                  onClick={() => {
-                    onUpdateSettings({ format: fmt });
-                    setTimeout(() => onBatchEstimate(), 0);
-                  }}
+                  onClick={() => onUpdateSettings({ format: fmt })}
                   className={`flex-1 px-2 py-1.5 text-sm rounded-[10px] transition-colors ${
                     format === fmt
                       ? "bg-highlight text-black font-medium"
@@ -1172,10 +1184,13 @@ async function generateImageBlobWithLimit(
   const { editorState, imageInfo } = img.pipelineState;
   const baseOpts = { targetWidth: tw, targetHeight: th, format: mime };
 
+  const skipOpts = { skipDataUrl: true };
+
   // 無限制或 PNG (無損) → 直接生成
   if (!targetBytes || mime === "image/png") {
     const r = await generateCroppedImage(img.imgElement, editorState, imageInfo, {
       ...baseOpts,
+      ...skipOpts,
       quality,
     });
     return r.blob;
@@ -1186,6 +1201,7 @@ async function generateImageBlobWithLimit(
   let maxQ = 1.0;
   let r = await generateCroppedImage(img.imgElement, editorState, imageInfo, {
     ...baseOpts,
+    ...skipOpts,
     quality: maxQ,
   });
 
@@ -1196,8 +1212,11 @@ async function generateImageBlobWithLimit(
   let attempts = 0;
   while (attempts < 10 && maxQ - minQ > 0.02) {
     const midQ = (minQ + maxQ) / 2;
+    // 每次迭代讓出主線程
+    await new Promise((r) => setTimeout(r, 0));
     r = await generateCroppedImage(img.imgElement, editorState, imageInfo, {
       ...baseOpts,
+      ...skipOpts,
       quality: midQ,
     });
     if (r.blob.size > targetBytes) maxQ = midQ;
@@ -1208,6 +1227,7 @@ async function generateImageBlobWithLimit(
   // 以找到的品質做最終生成
   r = await generateCroppedImage(img.imgElement, editorState, imageInfo, {
     ...baseOpts,
+    ...skipOpts,
     quality: minQ,
   });
   return r.blob;
