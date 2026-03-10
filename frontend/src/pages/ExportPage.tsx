@@ -837,6 +837,8 @@ function OutputSettingsPanel({
   const [heightError, setHeightError] = useState(false);
   const [targetSizeInput, setTargetSizeInput] = useState(String(settings.targetKB ?? ""));
   const [targetUnit, setTargetUnit] = useState<"KB" | "MB" | "GB">("KB");
+  /** 拖曳中的品質值 (null = 未拖曳，使用 settings.quality) */
+  const [draggingQuality, setDraggingQuality] = useState<number | null>(null);
 
   const unitToKB = { KB: 1, MB: 1024, GB: 1024 * 1024 };
 
@@ -1157,7 +1159,7 @@ function OutputSettingsPanel({
                 <div className="flex items-center justify-between mb-1">
                   <span className="text-xs text-white/70">品質</span>
                   <DarkEditableNumber
-                    value={settings.quality}
+                    value={draggingQuality ?? settings.quality}
                     min={10}
                     max={100}
                     suffix="%"
@@ -1169,10 +1171,22 @@ function OutputSettingsPanel({
                   min={10}
                   max={100}
                   step={1}
-                  value={settings.quality}
-                  onChange={(e) => onUpdateSettings({ quality: parseInt(e.target.value) })}
-                  onMouseUp={() => setTimeout(() => onBatchEstimate(), 0)}
-                  onTouchEnd={() => setTimeout(() => onBatchEstimate(), 0)}
+                  value={draggingQuality ?? settings.quality}
+                  onChange={(e) => setDraggingQuality(parseInt(e.target.value))}
+                  onMouseUp={() => {
+                    if (draggingQuality !== null) {
+                      onUpdateSettings({ quality: draggingQuality });
+                      setDraggingQuality(null);
+                      setTimeout(() => onBatchEstimate(), 0);
+                    }
+                  }}
+                  onTouchEnd={() => {
+                    if (draggingQuality !== null) {
+                      onUpdateSettings({ quality: draggingQuality });
+                      setDraggingQuality(null);
+                      setTimeout(() => onBatchEstimate(), 0);
+                    }
+                  }}
                   className="w-full slider-dark"
                 />
                 <div className="flex justify-between text-[10px] text-white/60 mt-0.5">
