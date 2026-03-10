@@ -256,7 +256,11 @@ class VideoService:
             os.unlink(tmp_path)
 
     def generate_gif_preview(self, gif_bytes: bytes) -> bytes:
-        """將 GIF 轉為預覽用 MP4 (ultrafast, yuv420p, 無音訊)"""
+        """將 GIF 轉為預覽用 MP4 (ultrafast, yuv420p, 無音訊)
+
+        使用 pad 濾鏡確保輸出尺寸與原始 GIF 完全一致（偶數修正用 padding 而非裁剪），
+        避免前端裁切座標與後端原始尺寸產生偏移。
+        """
         from moviepy import VideoFileClip
 
         tmp_input = self._write_temp(gif_bytes, suffix=".gif")
@@ -264,11 +268,14 @@ class VideoService:
 
         try:
             clip = VideoFileClip(tmp_input)
+            # yuv420p 要求偶數尺寸：用 pad 補齊而非裁剪，保持座標一致
+            w, h = clip.size
+            pad_filter = f"pad=ceil({w}/2)*2:ceil({h}/2)*2:0:0"
             clip.write_videofile(
                 tmp_output,
                 codec="libx264",
                 preset="ultrafast",
-                ffmpeg_params=["-pix_fmt", "yuv420p"],
+                ffmpeg_params=["-pix_fmt", "yuv420p", "-vf", pad_filter],
                 audio=False,
                 logger=None,
             )

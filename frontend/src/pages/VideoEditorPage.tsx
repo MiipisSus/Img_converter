@@ -97,6 +97,7 @@ export function VideoEditorPage({ video, onExport, onReset, initialState }: Vide
 
   // ── GIF 預覽 MP4 URL (後端代理) ──
   const [gifPreviewUrl, setGifPreviewUrl] = useState<string | null>(null);
+  const [videoReady, setVideoReady] = useState(false);
   const seekTimerRef = useRef<number | null>(null);
 
   // ── Refs ──
@@ -106,9 +107,15 @@ export function VideoEditorPage({ video, onExport, onReset, initialState }: Vide
   const dragStartRef = useRef({ x: 0, y: 0, translateX: 0, translateY: 0, cropX: 0, cropY: 0, cropW: 0, cropH: 0 });
   const pinchRef = useRef({ active: false, startDist: 0, startScale: 1 });
 
-  // ── 統一的影片尺寸來源：優先使用瀏覽器 intrinsic，fallback 到 backend ──
-  const effectiveVideoW = intrinsicVideoSize?.w ?? videoInfo?.width ?? 1;
-  const effectiveVideoH = intrinsicVideoSize?.h ?? videoInfo?.height ?? 1;
+  // ── 統一的影片尺寸來源 ──
+  // GIF 來源：必須使用 videoInfo（後端裁切原始 GIF，MP4 預覽可能有偶數修正偏差）
+  // 一般影片：優先使用瀏覽器 intrinsic（最準確），fallback 到 backend
+  const effectiveVideoW = isGifSource
+    ? (videoInfo?.width ?? 1)
+    : (intrinsicVideoSize?.w ?? videoInfo?.width ?? 1);
+  const effectiveVideoH = isGifSource
+    ? (videoInfo?.height ?? 1)
+    : (intrinsicVideoSize?.h ?? videoInfo?.height ?? 1);
 
   // ── useVideoTransform Hook (使用統一尺寸) ──
   const transform = useVideoTransform({
@@ -135,6 +142,15 @@ export function VideoEditorPage({ video, onExport, onReset, initialState }: Vide
     videoUrlRef.current = url;
     return () => URL.revokeObjectURL(url);
   }, [video.file]);
+
+  // ── 影片源切換時重置 ready 狀態 ──
+  useEffect(() => {
+    setVideoReady(false);
+  }, [effectiveVideoSrc]);
+
+  const handleVideoReady = useCallback(() => {
+    setVideoReady(true);
+  }, []);
 
   // ── 載入影片資訊 ──
   useEffect(() => {
@@ -208,23 +224,36 @@ export function VideoEditorPage({ video, onExport, onReset, initialState }: Vide
     return () => ro.disconnect();
   }, []);
 
-  // ── 播放區間限制 (clip 模式)：到達 endT 時回到 startT ──
+  // ── 播放區間循環 (clip 模式)：到達 endT 時回到 startT 繼續播放 ──
   // 使用 trimRef 避免閉包捕獲舊值；拖曳中暫停循環邏輯
   useEffect(() => {
     const el = videoRef.current;
     if (!el || mode !== "clip") return;
 
+    const loopBack = () => {
+      if (isTrimDraggingRef.current) return;
+      el.currentTime = trimRef.current.startT;
+      setCurrentTime(trimRef.current.startT);
+      el.play();
+    };
+
     const handleTimeUpdate = () => {
       setCurrentTime(el.currentTime);
       if (isTrimDraggingRef.current) return;
       if (el.currentTime >= trimRef.current.endT) {
-        el.currentTime = trimRef.current.startT;
-        setCurrentTime(trimRef.current.startT);
+        loopBack();
       }
     };
 
+    // ended 事件：影片播到尾端（endT 超過影片長度時 timeupdate 來不及攔截）
+    const handleEnded = () => loopBack();
+
     el.addEventListener("timeupdate", handleTimeUpdate);
-    return () => el.removeEventListener("timeupdate", handleTimeUpdate);
+    el.addEventListener("ended", handleEnded);
+    return () => {
+      el.removeEventListener("timeupdate", handleTimeUpdate);
+      el.removeEventListener("ended", handleEnded);
+    };
   }, [mode]);
 
   // ── 播放區間限制 (default 模式含 exportConfig)：到達 end_t 時回到 start_t ──
@@ -350,10 +379,16 @@ export function VideoEditorPage({ video, onExport, onReset, initialState }: Vide
     const el = clipAreaRef.current;
     if (!el) return;
 
-    // 擷取瀏覽器實際解碼的影片解析度 (在模式切換前，video 元素仍掛載)
+    // 擷取影片解析度
+    // GIF：使用 videoInfo（後端裁切原始 GIF，避免 MP4 預覽偶數修正偏差）
+    // 一般影片：使用瀏覽器 intrinsic（最準確）
     const vid = videoRef.current;
-    const vW = (vid && vid.videoWidth > 0) ? vid.videoWidth : videoInfo.width;
-    const vH = (vid && vid.videoHeight > 0) ? vid.videoHeight : videoInfo.height;
+    const vW = isGifSource
+      ? videoInfo.width
+      : ((vid && vid.videoWidth > 0) ? vid.videoWidth : videoInfo.width);
+    const vH = isGifSource
+      ? videoInfo.height
+      : ((vid && vid.videoHeight > 0) ? vid.videoHeight : videoInfo.height);
     setIntrinsicVideoSize({ w: vW, h: vH });
 
     // 先用當前佈局計算初始尺寸
@@ -541,14 +576,12 @@ export function VideoEditorPage({ video, onExport, onReset, initialState }: Vide
     isTrimDraggingRef.current = false;
     const el = videoRef.current;
     if (!el) return;
-    if (wasPlayingBeforeDragRef.current) {
-      // 放手後從 startT 開始循環播放
-      if (target === "start" || target === "end") {
-        el.currentTime = trimRef.current.startT;
-        setCurrentTime(trimRef.current.startT);
-      }
-      el.play();
+    // 放手後一律從 startT 開始循環播放
+    if (target === "start" || target === "end") {
+      el.currentTime = trimRef.current.startT;
+      setCurrentTime(trimRef.current.startT);
     }
+    el.play();
   }, []);
 
   // ─────────────────────────────────────────────
@@ -1103,6 +1136,7 @@ export function VideoEditorPage({ video, onExport, onReset, initialState }: Vide
                         transition: isSnappingBack ? "transform 200ms ease-out" : "none",
                         willChange: "transform",
                       }}
+                      onLoadedData={handleVideoReady}
                       muted
                       playsInline
                     />
@@ -1185,6 +1219,7 @@ export function VideoEditorPage({ video, onExport, onReset, initialState }: Vide
                   left: `${(-exportConfig.crop_x / exportConfig.crop_w) * 100}%`,
                   top: `${(-exportConfig.crop_y / exportConfig.crop_h) * 100}%`,
                 }}
+                onLoadedData={handleVideoReady}
                 muted
                 autoPlay
                 playsInline
@@ -1202,11 +1237,23 @@ export function VideoEditorPage({ video, onExport, onReset, initialState }: Vide
                 transition: "transform 0.4s cubic-bezier(0.4, 0, 0.2, 1)",
                 ...(isRotated90 ? { maxWidth: "100vh", maxHeight: "100vw" } : {}),
               }}
+              onLoadedData={handleVideoReady}
               muted
               autoPlay
               loop
               playsInline
             />
+          )}
+
+          {/* GIF 處理中 / 影片載入中 — 轉圈提示 */}
+          {isGifSource && !videoReady && (
+            <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/60 z-10">
+              <svg className="w-10 h-10 text-[#00B4FF] animate-spin" viewBox="0 0 24 24" fill="none">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+              </svg>
+              <span className="text-white/70 text-sm mt-3">正在處理 GIF...</span>
+            </div>
           )}
         </div>
 
