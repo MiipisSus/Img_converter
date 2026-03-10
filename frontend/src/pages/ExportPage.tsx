@@ -378,10 +378,26 @@ export function ExportPage({
     URL.revokeObjectURL(url);
   }, []);
 
+  /** 嘗試 Web Share API；成功回傳 true，不支援或失敗回傳 false */
+  const tryShare = async (blob: Blob, filename: string, mimeType: string): Promise<boolean> => {
+    if (!navigator.share) return false;
+    const file = new File([blob], filename, { type: mimeType });
+    if (!navigator.canShare?.({ files: [file] })) return false;
+    try {
+      await navigator.share({ files: [file], title: "PicVic 匯出" });
+      return true;
+    } catch (e) {
+      // 使用者取消分享，視為已處理
+      if ((e as DOMException).name === "AbortError") return true;
+      return false;
+    }
+  };
+
+  const isMobile = "ontouchstart" in window || navigator.maxTouchPoints > 0;
+
   const handleDownload = async () => {
     if (isDownloading) return;
     setIsDownloading(true);
-    await new Promise((r) => setTimeout(r, 0));
     try {
       const imgs = imagesRef.current;
       const isMulti = imgs.length > 1;
@@ -435,32 +451,20 @@ export function ExportPage({
       );
 
       if (!isMulti && !isPdf) {
-        // 單圖
+        // ── 單圖 ──
         const { blob, ext, mime } = allResults[0];
         const filename = `processed-image.${ext}`;
-        const file = new File([blob], filename, { type: mime });
 
-        // 嘗試 Web Share API
-        if (navigator.share && navigator.canShare?.({ files: [file] })) {
-          try {
-            await navigator.share({ files: [file], title: "PicVic 匯出" });
-            return;
-          } catch (e) {
-            // 使用者取消分享，不視為錯誤
-            if ((e as DOMException).name === "AbortError") return;
-          }
-        }
+        if (await tryShare(blob, filename, mime)) return;
 
-        // Fallback: 桌面直接下載，觸控裝置顯示長按儲存提示
-        const isTouchDevice = "ontouchstart" in window || navigator.maxTouchPoints > 0;
-        if (isTouchDevice) {
+        if (isMobile) {
           const url = URL.createObjectURL(blob);
           setSaveHintImage({ url, filename });
         } else {
           triggerDownload(blob, filename);
         }
       } else if (!isPdf) {
-        // 多圖 ZIP
+        // ── 多圖 ZIP ──
         const JSZip = (await import("jszip")).default;
         const zip = new JSZip();
         allResults.forEach(({ blob, ext }, i) => {
@@ -468,19 +472,11 @@ export function ExportPage({
         });
         const zipBlob = await zip.generateAsync({ type: "blob" });
         const filename = "images.zip";
-        const file = new File([zipBlob], filename, { type: "application/zip" });
 
-        if (navigator.share && navigator.canShare?.({ files: [file] })) {
-          try {
-            await navigator.share({ files: [file], title: "PicVic 匯出" });
-            return;
-          } catch (e) {
-            if ((e as DOMException).name === "AbortError") return;
-          }
-        }
+        if (await tryShare(zipBlob, filename, "application/zip")) return;
         triggerDownload(zipBlob, filename);
       } else {
-        // PDF
+        // ── PDF ──
         const { exportPdf } = await import("../api/exportPdf");
         const pdfBlob = await exportPdf({
           images: allResults.map((r) => r.blob),
@@ -492,17 +488,18 @@ export function ExportPage({
             : null,
         });
         const filename = "export.pdf";
-        const file = new File([pdfBlob], filename, { type: "application/pdf" });
 
-        if (navigator.share && navigator.canShare?.({ files: [file] })) {
-          try {
-            await navigator.share({ files: [file], title: "PicVic 匯出" });
-            return;
-          } catch (e) {
-            if ((e as DOMException).name === "AbortError") return;
-          }
+        // 行動裝置優先使用系統分享 (避免 <a download> 僅開啟預覽)
+        if (await tryShare(pdfBlob, filename, "application/pdf")) return;
+
+        if (isMobile) {
+          // iOS Safari 不支援 <a download> PDF — 用 open 讓使用者手動儲存
+          const url = URL.createObjectURL(pdfBlob);
+          window.open(url, "_blank");
+          setTimeout(() => URL.revokeObjectURL(url), 60_000);
+        } else {
+          triggerDownload(pdfBlob, filename);
         }
-        triggerDownload(pdfBlob, filename);
       }
     } catch (err) {
       console.error("匯出失敗:", err);
