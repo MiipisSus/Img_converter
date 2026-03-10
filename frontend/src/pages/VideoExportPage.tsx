@@ -510,10 +510,17 @@ export function VideoExportPage({
   // ── 永遠渲染完整佈局 (不因 loading 而 early return) ──
   return (
     <div className="h-screen flex overflow-hidden bg-sidebar layout-editor">
+      {/* 手機版 Header (Logo) */}
+      <header className="hidden max-md:flex items-center justify-center bg-sidebar px-4 py-2">
+        <button onClick={() => setShowResetModal(true)} className="cursor-pointer">
+          <img src={vicLogo} alt="VicgoVic!" className="h-10" />
+        </button>
+      </header>
+
       {/* ===== 左側設定面板 ===== */}
       <aside className="w-[30%] min-w-[240px] max-w-[320px] flex flex-col h-screen sidebar-scroll overflow-y-auto bg-sidebar max-md:h-auto">
-        {/* Logo */}
-        <div className="p-4 pb-2 mx-auto mb-6">
+        {/* Logo (桌面版) */}
+        <div className="p-4 pb-2 mx-auto mb-6 max-md:hidden">
           <button onClick={() => setShowResetModal(true)} className="cursor-pointer">
             <img src={vicLogo} alt="VicgoVic!" className="h-16" />
           </button>
@@ -534,8 +541,8 @@ export function VideoExportPage({
             </div>
           ) : (
             <>
-              {/* ── 影片資訊 ── */}
-              <div className="bg-white/10 rounded-[10px] p-3">
+              {/* ── 影片資訊 (手機版隱藏) ── */}
+              <div className="bg-white/10 rounded-[10px] p-3 max-md:hidden">
                 <p className="text-xs text-white/70 mb-2 font-medium">影片資訊</p>
                 <div className="flex flex-col gap-1 text-xs text-white/50">
                   <div className="flex justify-between">

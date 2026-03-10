@@ -238,6 +238,12 @@ input[type="number"].input-vic:focus {
     border-top: 1px solid rgba(255, 255, 255, 0.1);
   }
 
+  /* 手機版 header (Logo) */
+  .layout-editor > header {
+    order: 0;
+    flex-shrink: 0;
+  }
+
   /* 預覽區域：佔上方空間 */
   .layout-editor > main {
     flex: 1;
