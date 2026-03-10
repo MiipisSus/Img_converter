@@ -10,6 +10,7 @@ import {
 } from "../api/videoApi";
 import type { VideoInfoResult, TaskStatusResult } from "../api/videoApi";
 import vicLogo from "../assets/vic_logo.png";
+import vicFavicon from "../assets/vic_favicon.png";
 import { ConfirmModal } from "../components/ConfirmModal";
 
 interface VideoExportPageProps {
@@ -81,6 +82,13 @@ export function VideoExportPage({
   const [outputInfo, setOutputInfo] = useState<TaskStatusResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [downloading, setDownloading] = useState(false);
+
+  // ── 手機端下載分流 ──
+  const isMobile = "ontouchstart" in window || navigator.maxTouchPoints > 0;
+  const [mobileMenu, setMobileMenu] = useState(false);
+  const [albumMedia, setAlbumMedia] = useState<{ url: string; type: "gif" | "mp4" } | null>(null);
+  const [shareHint, setShareHint] = useState<string | null>(null);
+  const cachedBlobRef = useRef<Blob | null>(null);
 
   const pollRef = useRef<ReturnType<typeof setInterval>>(undefined);
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -477,26 +485,134 @@ export function VideoExportPage({
     }
   }, [videoInfo, video.file, targetKB, outputFormat, targetWidth, clipConfig, rotate, flipH, flipV, includeAudio, encodingPreset]);
 
-  // ── 下載 ──
+  // ── 下載輔助 ──
+  const triggerBlobDownload = useCallback((blob: Blob, filename: string) => {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }, []);
+
+  const getExportFilename = useCallback(() => {
+    const ext = outputFormat === "gif" ? "gif" : "mp4";
+    return `${video.name.replace(/\.[^.]+$/, "")}_export.${ext}`;
+  }, [video.name, outputFormat]);
+
+  /** 取得匯出 Blob（優先使用快取，避免 task 已清理後無法重複下載） */
+  const getExportBlob = useCallback(async (): Promise<Blob> => {
+    if (cachedBlobRef.current) return cachedBlobRef.current;
+    if (!taskId) throw new Error("無可用的任務");
+    const blob = await downloadVideo(taskId);
+    cachedBlobRef.current = blob;
+    // 拿到 blob 後即可清理伺服器端 task
+    cleanupTask(taskId).catch(() => {});
+    return blob;
+  }, [taskId]);
+
+  // ── 下載 (入口) ──
   const handleDownload = useCallback(async () => {
-    if (!taskId) return;
+    if (!taskId && !cachedBlobRef.current) return;
+    if (isMobile) {
+      setMobileMenu(true);
+      return;
+    }
+    // 桌面端：直接下載
     setDownloading(true);
     try {
-      const blob = await downloadVideo(taskId);
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      const ext = outputFormat === "gif" ? "gif" : "mp4";
-      a.download = `${video.name.replace(/\.[^.]+$/, "")}_export.${ext}`;
-      a.click();
-      URL.revokeObjectURL(url);
-      await cleanupTask(taskId);
+      const blob = await getExportBlob();
+      triggerBlobDownload(blob, getExportFilename());
     } catch (err) {
       console.error("下載失敗:", err);
     } finally {
       setDownloading(false);
     }
-  }, [taskId, video.name, outputFormat]);
+  }, [taskId, isMobile, triggerBlobDownload, getExportFilename, getExportBlob]);
+
+  // ── 手機分流：儲存至檔案 ──
+  const handleMobileSaveToFile = useCallback(async () => {
+    setMobileMenu(false);
+    setDownloading(true);
+    try {
+      const blob = await getExportBlob();
+      const filename = getExportFilename();
+      const mime = outputFormat === "gif" ? "image/gif" : "video/mp4";
+      const file = new File([blob], filename, { type: mime });
+      // 嘗試系統分享
+      if (navigator.share && navigator.canShare?.({ files: [file] })) {
+        try {
+          await navigator.share({ files: [file], title: "VicgoVic 匯出" });
+          return;
+        } catch (e) {
+          if ((e as DOMException).name === "AbortError") return;
+        }
+      }
+      // fallback: 瀏覽器下載
+      triggerBlobDownload(blob, filename);
+    } catch (err) {
+      console.error("下載失敗:", err);
+    } finally {
+      setDownloading(false);
+    }
+  }, [outputFormat, triggerBlobDownload, getExportFilename, getExportBlob]);
+
+  // ── 手機分流：儲存至相簿 ──
+  const handleMobileSaveToAlbum = useCallback(async () => {
+    setMobileMenu(false);
+    setDownloading(true);
+    try {
+      const blob = await getExportBlob();
+      const filename = getExportFilename();
+      const mime = outputFormat === "gif" ? "image/gif" : "video/mp4";
+
+      if (outputFormat === "gif") {
+        // GIF: 顯示長按儲存 Modal
+        const url = URL.createObjectURL(blob);
+        setAlbumMedia({ url, type: "gif" });
+      } else {
+        // MP4: 優先嘗試 navigator.share
+        const file = new File([blob], filename, { type: mime });
+        if (navigator.share && navigator.canShare?.({ files: [file] })) {
+          try {
+            await navigator.share({ files: [file], title: "VicgoVic 匯出" });
+            return;
+          } catch (e) {
+            if ((e as DOMException).name === "AbortError") return;
+          }
+        }
+        // fallback: 開啟新分頁
+        const url = URL.createObjectURL(blob);
+        setAlbumMedia({ url, type: "mp4" });
+        setShareHint("請在新頁面中點擊瀏覽器的分享按鈕，並選擇「儲存影片」");
+        window.open(url, "_blank");
+      }
+    } catch (err) {
+      console.error("下載失敗:", err);
+    } finally {
+      setDownloading(false);
+    }
+  }, [outputFormat, getExportFilename, getExportBlob]);
+
+  // ── 關閉相簿 Modal ──
+  const closeAlbumModal = useCallback(() => {
+    if (albumMedia) {
+      URL.revokeObjectURL(albumMedia.url);
+    }
+    setAlbumMedia(null);
+    setShareHint(null);
+  }, [albumMedia]);
+
+  // ── 頁面卸載時清理 blob URL + 快取 ──
+  useEffect(() => {
+    return () => {
+      if (albumMedia) URL.revokeObjectURL(albumMedia.url);
+      cachedBlobRef.current = null;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // ── CSS 旋轉/翻轉 (預覽用) ──
   const previewTransform = [
@@ -992,6 +1108,96 @@ export function VideoExportPage({
           </div>
         )}
       </main>
+
+      {/* 手機端分流選單 */}
+      {mobileMenu && (
+        <div
+          className="fixed inset-0 z-[9999] bg-black/70 flex items-end justify-center"
+          onClick={() => setMobileMenu(false)}
+        >
+          <div
+            className="w-full max-w-sm mb-8 mx-4 flex flex-col gap-2 animate-slide-up"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="bg-[#2a2a2a] rounded-2xl overflow-hidden">
+              <button
+                onClick={handleMobileSaveToAlbum}
+                className="w-full px-4 py-4 text-white text-base font-medium border-b border-white/10 active:bg-white/10"
+              >
+                儲存至相簿
+              </button>
+              <button
+                onClick={handleMobileSaveToFile}
+                className="w-full px-4 py-4 text-white text-base font-medium active:bg-white/10"
+              >
+                儲存至檔案
+              </button>
+            </div>
+            <button
+              onClick={() => setMobileMenu(false)}
+              className="w-full px-4 py-4 bg-[#2a2a2a] rounded-2xl text-white/60 text-base font-medium active:bg-white/10"
+            >
+              取消
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* 儲存至相簿 Modal (GIF 長按 / MP4 提示) */}
+      {albumMedia && (
+        <div className="fixed inset-0 z-[9999] bg-black/90 flex flex-col">
+          {/* 頂部提示 + 關閉 */}
+          <div className="shrink-0 flex items-center justify-between px-4 py-3 border-b border-white/10">
+            <p className="text-white/90 text-sm flex items-center gap-1.5">
+              <img src={vicFavicon} alt="" className="w-5 h-5" />
+              {albumMedia.type === "gif"
+                ? "長按圖片即可儲存至相片圖庫"
+                : "請使用瀏覽器分享按鈕儲存影片"}
+            </p>
+            <button
+              onClick={closeAlbumModal}
+              className="px-4 py-2 text-white/60 text-sm active:text-white"
+            >
+              關閉
+            </button>
+          </div>
+
+          {/* 內容區 */}
+          <div className="flex-1 overflow-y-auto p-4 flex items-center justify-center">
+            <div className="max-w-lg w-full flex flex-col items-center gap-4">
+              {albumMedia.type === "gif" ? (
+                <img
+                  src={albumMedia.url}
+                  alt=""
+                  className="max-w-full rounded-lg"
+                  style={{ maxHeight: "70vh" }}
+                />
+              ) : (
+                <div className="flex flex-col items-center gap-4 text-center">
+                  <div className="w-16 h-16 rounded-full bg-[#00B4FF]/20 flex items-center justify-center">
+                    <svg className="w-8 h-8 text-[#00B4FF]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                    </svg>
+                  </div>
+                  {shareHint && (
+                    <p className="text-white/70 text-sm leading-relaxed">{shareHint}</p>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* 底部關閉按鈕 */}
+          <div className="shrink-0 px-4 py-4 border-t border-white/10 flex justify-center">
+            <button
+              onClick={closeAlbumModal}
+              className="px-8 py-3 bg-white/10 text-white/80 rounded-xl text-sm font-medium active:bg-white/20"
+            >
+              關閉
+            </button>
+          </div>
+        </div>
+      )}
 
       <ConfirmModal
         open={showResetModal}
