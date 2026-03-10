@@ -104,6 +104,7 @@ export function VideoEditorPage({ video, onExport, onReset, initialState }: Vide
   const videoUrlRef = useRef<string>("");
   const clipAreaRef = useRef<HTMLDivElement>(null);
   const dragStartRef = useRef({ x: 0, y: 0, translateX: 0, translateY: 0, cropX: 0, cropY: 0, cropW: 0, cropH: 0 });
+  const pinchRef = useRef({ active: false, startDist: 0, startScale: 1 });
 
   // ── 統一的影片尺寸來源：優先使用瀏覽器 intrinsic，fallback 到 backend ──
   const effectiveVideoW = intrinsicVideoSize?.w ?? videoInfo?.width ?? 1;
@@ -579,11 +580,57 @@ export function VideoEditorPage({ video, onExport, onReset, initialState }: Vide
     [transform.state.cropX, transform.state.cropY, transform.state.cropW, transform.state.cropH],
   );
 
-  // ── 全域滑鼠事件 (拖曳 / 調整) ──
+  // ── 觸控：調整裁切框大小 ──
+  const handleCropResizeTouchStart = useCallback(
+    (handle: CropResizeHandle) => (e: React.TouchEvent) => {
+      e.stopPropagation();
+      const touch = e.touches[0];
+      setIsResizingCrop(handle);
+      dragStartRef.current = {
+        x: touch.clientX,
+        y: touch.clientY,
+        translateX: 0,
+        translateY: 0,
+        cropX: transform.state.cropX,
+        cropY: transform.state.cropY,
+        cropW: transform.state.cropW,
+        cropH: transform.state.cropH,
+      };
+    },
+    [transform.state.cropX, transform.state.cropY, transform.state.cropW, transform.state.cropH],
+  );
+
+  // ── 觸控：拖動影片 / 雙指縮放 ──
+  const handleCropContainerTouchStart = useCallback(
+    (e: React.TouchEvent) => {
+      if (e.touches.length === 2) {
+        const dx = e.touches[0].clientX - e.touches[1].clientX;
+        const dy = e.touches[0].clientY - e.touches[1].clientY;
+        pinchRef.current = {
+          active: true,
+          startDist: Math.hypot(dx, dy),
+          startScale: transform.state.scale,
+        };
+      } else if (e.touches.length === 1) {
+        const touch = e.touches[0];
+        setIsDraggingVideo(true);
+        dragStartRef.current = {
+          x: touch.clientX,
+          y: touch.clientY,
+          translateX: transform.state.translateX,
+          translateY: transform.state.translateY,
+          cropX: 0, cropY: 0, cropW: 0, cropH: 0,
+        };
+      }
+    },
+    [transform.state.scale, transform.state.translateX, transform.state.translateY],
+  );
+
+  // ── 全域滑鼠 + 觸控事件 (拖曳 / 調整 / 雙指縮放) ──
   useEffect(() => {
-    const handleMouseMove = (e: MouseEvent) => {
-      const deltaX = e.clientX - dragStartRef.current.x;
-      const deltaY = e.clientY - dragStartRef.current.y;
+    const handleMove = (clientX: number, clientY: number) => {
+      const deltaX = clientX - dragStartRef.current.x;
+      const deltaY = clientY - dragStartRef.current.y;
 
       if (isResizingCrop) {
         transform.setCropBox({
@@ -601,19 +648,43 @@ export function VideoEditorPage({ video, onExport, onReset, initialState }: Vide
       }
     };
 
-    const handleMouseUp = () => {
+    const handleMouseMove = (e: MouseEvent) => handleMove(e.clientX, e.clientY);
+
+    const handleTouchMove = (e: TouchEvent) => {
+      e.preventDefault();
+      if (e.touches.length === 2 && pinchRef.current.active) {
+        const dx = e.touches[0].clientX - e.touches[1].clientX;
+        const dy = e.touches[0].clientY - e.touches[1].clientY;
+        const dist = Math.hypot(dx, dy);
+        const ratio = dist / pinchRef.current.startDist;
+        transform.setScale(pinchRef.current.startScale * ratio);
+        return;
+      }
+      if (e.touches.length === 1) {
+        handleMove(e.touches[0].clientX, e.touches[0].clientY);
+      }
+    };
+
+    const handleEnd = () => {
       setIsResizingCrop(null);
       setIsDraggingVideo(false);
+      pinchRef.current.active = false;
       setIsSnappingBack(true);
       transform.clampPosition();
     };
 
-    if (isResizingCrop || isDraggingVideo) {
+    if (isResizingCrop || isDraggingVideo || pinchRef.current.active) {
       window.addEventListener("mousemove", handleMouseMove);
-      window.addEventListener("mouseup", handleMouseUp);
+      window.addEventListener("mouseup", handleEnd);
+      window.addEventListener("touchmove", handleTouchMove, { passive: false });
+      window.addEventListener("touchend", handleEnd);
+      window.addEventListener("touchcancel", handleEnd);
       return () => {
         window.removeEventListener("mousemove", handleMouseMove);
-        window.removeEventListener("mouseup", handleMouseUp);
+        window.removeEventListener("mouseup", handleEnd);
+        window.removeEventListener("touchmove", handleTouchMove);
+        window.removeEventListener("touchend", handleEnd);
+        window.removeEventListener("touchcancel", handleEnd);
       };
     }
   }, [isResizingCrop, isDraggingVideo, transform]);
@@ -981,9 +1052,11 @@ export function VideoEditorPage({ video, onExport, onReset, initialState }: Vide
                   width: cropContainerSize.width,
                   height: cropContainerSize.height,
                   cursor: isDraggingVideo ? "grabbing" : "grab",
+                  touchAction: "none",
                 }}
                 onWheel={handleCropWheel}
                 onMouseDown={handleCropContainerMouseDown}
+                onTouchStart={handleCropContainerTouchStart}
               >
                 {/* overflow-hidden 裁剪層 */}
                 <div className="absolute inset-0 overflow-hidden">
@@ -1013,6 +1086,7 @@ export function VideoEditorPage({ video, onExport, onReset, initialState }: Vide
                     cropH={cropH}
                     transition={cropTransition}
                     onResizeMouseDown={handleCropResizeMouseDown}
+                    onResizeTouchStart={handleCropResizeTouchStart}
                   />
                 </div>
               </div>

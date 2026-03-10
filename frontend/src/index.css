@@ -223,7 +223,7 @@ input[type="number"].input-vic:focus {
   }
 
   /* sidebar 內操作按鈕最小觸控尺寸 (排除裁切把手與預設小按鈕) */
-  .layout-editor > aside button:not(.crop-handle):not(.crop-ratio-btn) {
+  .layout-editor > aside button:not(.crop-handle):not(.crop-ratio-btn):not(.toggle-switch) {
     min-height: 44px;
   }
 

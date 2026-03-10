@@ -9,6 +9,7 @@ interface CropOverlayProps {
   cropH: number;
   transition: string;
   onResizeMouseDown: (handle: CropResizeHandle) => (e: React.MouseEvent) => void;
+  onResizeTouchStart?: (handle: CropResizeHandle) => (e: React.TouchEvent) => void;
 }
 
 export function CropOverlay({
@@ -18,6 +19,7 @@ export function CropOverlay({
   cropH,
   transition,
   onResizeMouseDown,
+  onResizeTouchStart,
 }: CropOverlayProps) {
   return (
     <>
@@ -88,7 +90,7 @@ export function CropOverlay({
               borderRadius: 2,
             }}
             onMouseDown={onResizeMouseDown(handle)}
-            onTouchStart={onResizeMouseDown(handle) as unknown as React.TouchEventHandler}
+            onTouchStart={onResizeTouchStart?.(handle)}
           />
         ))}
 
@@ -134,6 +136,7 @@ export function CropOverlay({
               }),
             }}
             onMouseDown={onResizeMouseDown(handle)}
+            onTouchStart={onResizeTouchStart?.(handle)}
           />
         ))}
       </div>

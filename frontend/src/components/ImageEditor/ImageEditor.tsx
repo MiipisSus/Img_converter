@@ -66,6 +66,8 @@ export function ImageEditor({
     imageX: 0,
     imageY: 0,
   });
+  // 雙指縮放狀態
+  const pinchRef = useRef({ active: false, startDist: 0, startScale: 1 });
 
   // V8: 傳入 viewport 尺寸供 viewport-aware M 計算
   const editor = useImageEditor({ initialState, viewportWidth, viewportHeight, referenceM });
@@ -176,11 +178,62 @@ export function ImageEditor({
     [state.scale, state.rotate, state.imageX, state.imageY],
   );
 
-  // --- 全域滑鼠事件 ---
+  // --- 觸控：調整裁切框大小 ---
+  const handleResizeTouchStart = useCallback(
+    (handle: ResizeHandle) => (e: React.TouchEvent) => {
+      e.stopPropagation();
+      const touch = e.touches[0];
+      setIsResizing(handle);
+      dragStartRef.current = {
+        x: touch.clientX,
+        y: touch.clientY,
+        cropX: state.cropX,
+        cropY: state.cropY,
+        cropW: state.cropW,
+        cropH: state.cropH,
+        imageX: 0,
+        imageY: 0,
+      };
+    },
+    [state.cropX, state.cropY, state.cropW, state.cropH],
+  );
+
+  // --- 觸控：拖動圖片 / 雙指縮放 ---
+  const handleContainerTouchStart = useCallback(
+    (e: React.TouchEvent) => {
+      if (e.touches.length === 2) {
+        // 雙指縮放
+        const dx = e.touches[0].clientX - e.touches[1].clientX;
+        const dy = e.touches[0].clientY - e.touches[1].clientY;
+        pinchRef.current = {
+          active: true,
+          startDist: Math.hypot(dx, dy),
+          startScale: state.scale,
+        };
+      } else if (e.touches.length === 1) {
+        // 單指拖動
+        const touch = e.touches[0];
+        setIsDraggingImage(true);
+        dragStartRef.current = {
+          x: touch.clientX,
+          y: touch.clientY,
+          cropX: 0,
+          cropY: 0,
+          cropW: 0,
+          cropH: 0,
+          imageX: state.imageX,
+          imageY: state.imageY,
+        };
+      }
+    },
+    [state.scale, state.imageX, state.imageY],
+  );
+
+  // --- 全域滑鼠 + 觸控事件 ---
   useEffect(() => {
-    const handleMouseMove = (e: MouseEvent) => {
-      const deltaX = e.clientX - dragStartRef.current.x;
-      const deltaY = e.clientY - dragStartRef.current.y;
+    const handleMove = (clientX: number, clientY: number) => {
+      const deltaX = clientX - dragStartRef.current.x;
+      const deltaY = clientY - dragStartRef.current.y;
 
       if (isResizing) {
         setCropBox({
@@ -198,20 +251,44 @@ export function ImageEditor({
       }
     };
 
-    const handleMouseUp = () => {
+    const handleMouseMove = (e: MouseEvent) => handleMove(e.clientX, e.clientY);
+
+    const handleTouchMove = (e: TouchEvent) => {
+      e.preventDefault();
+      if (e.touches.length === 2 && pinchRef.current.active) {
+        // 雙指縮放
+        const dx = e.touches[0].clientX - e.touches[1].clientX;
+        const dy = e.touches[0].clientY - e.touches[1].clientY;
+        const dist = Math.hypot(dx, dy);
+        const ratio = dist / pinchRef.current.startDist;
+        setScale(pinchRef.current.startScale * ratio);
+        return;
+      }
+      if (e.touches.length === 1) {
+        handleMove(e.touches[0].clientX, e.touches[0].clientY);
+      }
+    };
+
+    const handleEnd = () => {
       setIsResizing(null);
       setIsDraggingImage(false);
-      // 啟用回彈動畫，然後修正位置
+      pinchRef.current.active = false;
       setIsSnappingBack(true);
       clampImage();
     };
 
-    if (isResizing || isDraggingImage) {
+    if (isResizing || isDraggingImage || pinchRef.current.active) {
       window.addEventListener("mousemove", handleMouseMove);
-      window.addEventListener("mouseup", handleMouseUp);
+      window.addEventListener("mouseup", handleEnd);
+      window.addEventListener("touchmove", handleTouchMove, { passive: false });
+      window.addEventListener("touchend", handleEnd);
+      window.addEventListener("touchcancel", handleEnd);
       return () => {
         window.removeEventListener("mousemove", handleMouseMove);
-        window.removeEventListener("mouseup", handleMouseUp);
+        window.removeEventListener("mouseup", handleEnd);
+        window.removeEventListener("touchmove", handleTouchMove);
+        window.removeEventListener("touchend", handleEnd);
+        window.removeEventListener("touchcancel", handleEnd);
       };
     }
   }, [
@@ -221,6 +298,7 @@ export function ImageEditor({
     resizeCropBox,
     setImagePosition,
     clampImage,
+    setScale,
   ]);
 
   // 回彈動畫結束後重置 (fallback timeout 防止 transitionEnd 未觸發)
@@ -262,9 +340,11 @@ export function ImageEditor({
           width: containerWidth,
           height: containerHeight,
           cursor: isDraggingImage ? "grabbing" : "grab",
+          touchAction: "none",
         }}
         onWheel={handleWheel}
         onMouseDown={handleContainerMouseDown}
+        onTouchStart={handleContainerTouchStart}
       >
         {/* 裁剪層: 棋盤格 + 圖片 + 遮罩 (overflow-hidden) */}
         <div className="absolute inset-0 overflow-hidden">
@@ -380,6 +460,7 @@ export function ImageEditor({
                   borderRadius: 2,
                 }}
                 onMouseDown={handleResizeMouseDown(handle)}
+                onTouchStart={handleResizeTouchStart(handle)}
               />
             ))}
 
@@ -425,6 +506,7 @@ export function ImageEditor({
                   }),
                 }}
                 onMouseDown={handleResizeMouseDown(handle)}
+                onTouchStart={handleResizeTouchStart(handle)}
               />
             ))}
           </div>
