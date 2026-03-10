@@ -363,6 +363,20 @@ export function ExportPage({
 
   // ── 下載邏輯 (即時生成 blob，帶正確輸出格式) ──
   const [isDownloading, setIsDownloading] = useState(false);
+  // 長按儲存 fallback modal
+  const [saveHintImage, setSaveHintImage] = useState<{ url: string; filename: string } | null>(null);
+
+  /** 桌面端下載：建立 <a> 觸發瀏覽器下載 */
+  const triggerDownload = useCallback((blob: Blob, filename: string) => {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }, []);
 
   const handleDownload = async () => {
     if (isDownloading) return;
@@ -416,19 +430,35 @@ export function ExportPage({
           }
 
           const blob = await generateImageBlobWithLimit(img, tw, th, mime, q, targetBytes);
-          return { blob, ext: fmt };
+          return { blob, ext: fmt, mime };
         }),
       );
 
       if (!isMulti && !isPdf) {
-        // 單圖直接下載
-        const { blob, ext } = allResults[0];
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = `processed-image.${ext}`;
-        a.click();
-        URL.revokeObjectURL(url);
+        // 單圖
+        const { blob, ext, mime } = allResults[0];
+        const filename = `processed-image.${ext}`;
+        const file = new File([blob], filename, { type: mime });
+
+        // 嘗試 Web Share API
+        if (navigator.share && navigator.canShare?.({ files: [file] })) {
+          try {
+            await navigator.share({ files: [file], title: "PicVic 匯出" });
+            return;
+          } catch (e) {
+            // 使用者取消分享，不視為錯誤
+            if ((e as DOMException).name === "AbortError") return;
+          }
+        }
+
+        // Fallback: 桌面直接下載，觸控裝置顯示長按儲存提示
+        const isTouchDevice = "ontouchstart" in window || navigator.maxTouchPoints > 0;
+        if (isTouchDevice) {
+          const url = URL.createObjectURL(blob);
+          setSaveHintImage({ url, filename });
+        } else {
+          triggerDownload(blob, filename);
+        }
       } else if (!isPdf) {
         // 多圖 ZIP
         const JSZip = (await import("jszip")).default;
@@ -437,14 +467,20 @@ export function ExportPage({
           zip.file(`image-${i + 1}.${ext}`, blob);
         });
         const zipBlob = await zip.generateAsync({ type: "blob" });
-        const url = URL.createObjectURL(zipBlob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = "images.zip";
-        a.click();
-        URL.revokeObjectURL(url);
+        const filename = "images.zip";
+        const file = new File([zipBlob], filename, { type: "application/zip" });
+
+        if (navigator.share && navigator.canShare?.({ files: [file] })) {
+          try {
+            await navigator.share({ files: [file], title: "PicVic 匯出" });
+            return;
+          } catch (e) {
+            if ((e as DOMException).name === "AbortError") return;
+          }
+        }
+        triggerDownload(zipBlob, filename);
       } else {
-        // PDF — 傳送 pdfMode/品質/總限制給後端
+        // PDF
         const { exportPdf } = await import("../api/exportPdf");
         const pdfBlob = await exportPdf({
           images: allResults.map((r) => r.blob),
@@ -455,12 +491,18 @@ export function ExportPage({
             ? os.targetKB
             : null,
         });
-        const url = URL.createObjectURL(pdfBlob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = "export.pdf";
-        a.click();
-        URL.revokeObjectURL(url);
+        const filename = "export.pdf";
+        const file = new File([pdfBlob], filename, { type: "application/pdf" });
+
+        if (navigator.share && navigator.canShare?.({ files: [file] })) {
+          try {
+            await navigator.share({ files: [file], title: "PicVic 匯出" });
+            return;
+          } catch (e) {
+            if ((e as DOMException).name === "AbortError") return;
+          }
+        }
+        triggerDownload(pdfBlob, filename);
       }
     } catch (err) {
       console.error("匯出失敗:", err);
@@ -551,7 +593,6 @@ export function ExportPage({
             imageInfo={null}
             originalSrc={imageSrc}
             previewUrl={pipelineState.previewUrl}
-            isProcessing={false}
             mode="output"
             outputWidth={pipelineState.outputWidth}
             outputHeight={pipelineState.outputHeight}
@@ -609,6 +650,39 @@ export function ExportPage({
           </div>
         )}
       </main>
+
+      {/* 長按儲存提示 Modal (觸控裝置 fallback) */}
+      {saveHintImage && (
+        <div
+          className="fixed inset-0 z-[9999] bg-black/70 flex items-center justify-center p-6"
+          onClick={() => {
+            URL.revokeObjectURL(saveHintImage.url);
+            setSaveHintImage(null);
+          }}
+        >
+          <div
+            className="bg-[#1e1e1e] rounded-2xl p-4 max-w-sm w-full flex flex-col items-center gap-3"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <p className="text-white/90 text-sm text-center">長按下方圖片以儲存</p>
+            <img
+              src={saveHintImage.url}
+              alt={saveHintImage.filename}
+              className="max-w-full max-h-[60vh] rounded-lg"
+            />
+            <p className="text-white/50 text-xs">{saveHintImage.filename}</p>
+            <button
+              onClick={() => {
+                URL.revokeObjectURL(saveHintImage.url);
+                setSaveHintImage(null);
+              }}
+              className="mt-1 px-6 py-2 bg-white/10 text-white/80 rounded-lg text-sm"
+            >
+              關閉
+            </button>
+          </div>
+        </div>
+      )}
 
       <ConfirmModal
         open={showResetModal}
