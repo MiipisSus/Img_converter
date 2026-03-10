@@ -603,6 +603,7 @@ export function VideoEditorPage({ video, onExport, onReset, initialState }: Vide
   // ── 觸控：拖動影片 / 雙指縮放 ──
   const handleCropContainerTouchStart = useCallback(
     (e: React.TouchEvent) => {
+      e.stopPropagation();
       if (e.touches.length === 2) {
         const dx = e.touches[0].clientX - e.touches[1].clientX;
         const dy = e.touches[0].clientY - e.touches[1].clientY;
@@ -651,7 +652,7 @@ export function VideoEditorPage({ video, onExport, onReset, initialState }: Vide
     const handleMouseMove = (e: MouseEvent) => handleMove(e.clientX, e.clientY);
 
     const handleTouchMove = (e: TouchEvent) => {
-      e.preventDefault();
+      if (e.cancelable) e.preventDefault();
       if (e.touches.length === 2 && pinchRef.current.active) {
         const dx = e.touches[0].clientX - e.touches[1].clientX;
         const dy = e.touches[0].clientY - e.touches[1].clientY;
@@ -735,7 +736,7 @@ export function VideoEditorPage({ video, onExport, onReset, initialState }: Vide
   // ── Loading ──
   if (loading) {
     return (
-      <div className="min-h-screen bg-sidebar flex items-center justify-center">
+      <div className="min-h-[100dvh] bg-sidebar flex items-center justify-center">
         <div className="text-white/50 text-sm">正在載入影片資訊...</div>
       </div>
     );
@@ -745,7 +746,7 @@ export function VideoEditorPage({ video, onExport, onReset, initialState }: Vide
   const { cropX, cropY, cropW, cropH } = transform.state;
 
   return (
-    <div className="h-screen flex overflow-hidden bg-sidebar layout-editor">
+    <div className="h-[100dvh] flex overflow-hidden bg-sidebar layout-editor">
       {/* 手機版 Header (Logo) */}
       <header className="hidden max-md:flex items-center justify-center bg-sidebar px-4 py-2">
         <button onClick={() => setShowResetModal(true)} className="cursor-pointer">
@@ -754,7 +755,7 @@ export function VideoEditorPage({ video, onExport, onReset, initialState }: Vide
       </header>
 
       {/* ── 左側面板 ── */}
-      <aside className="w-[30%] min-w-[240px] max-w-[320px] flex flex-col h-screen sidebar-scroll overflow-y-auto bg-sidebar max-md:h-auto">
+      <aside className="w-[30%] min-w-[240px] max-w-[320px] flex flex-col h-[100dvh] sidebar-scroll overflow-y-auto bg-sidebar max-md:h-auto">
         {/* Logo (桌面版) */}
         <div className="p-4 pb-2 mx-auto mb-6 max-md:hidden">
           <button onClick={() => setShowResetModal(true)} className="cursor-pointer">
@@ -1005,7 +1006,7 @@ export function VideoEditorPage({ video, onExport, onReset, initialState }: Vide
         </div>
 
         {/* 底部按鈕 */}
-        <div className="p-4 pt-0 flex flex-col gap-2">
+        <div className="p-4 pt-0 flex flex-col gap-2" style={{ paddingBottom: "max(16px, env(safe-area-inset-bottom))" }}>
           {mode === "clip" && (
             <button
               onClick={handleConfirmClip}
@@ -1048,7 +1049,7 @@ export function VideoEditorPage({ video, onExport, onReset, initialState }: Vide
       </aside>
 
       {/* ── 右側主要內容 ── */}
-      <main className="flex-1 flex flex-col h-screen">
+      <main className="flex-1 flex flex-col h-[100dvh]">
         <div ref={clipAreaRef} className="flex-1 bg-preview/5 flex flex-col items-center justify-center m-4 mb-0 rounded-lg overflow-hidden relative">
           {mode === "clip" && videoInfo ? (
             /* ── 剪輯工作區：上方裁切預覽 + 下方時間軸 ── */

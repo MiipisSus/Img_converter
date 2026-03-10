@@ -8,13 +8,11 @@ export async function generateFilmstrip(
   source: File | string,
   count = 10,
 ): Promise<string[]> {
-  // string → 直接當作 URL；File → 建立 ObjectURL
   const isUrl = typeof source === "string";
   const url = isUrl ? source : URL.createObjectURL(source);
 
   try {
-    const thumbnails = await extractFrames(url, count);
-    return thumbnails;
+    return await extractFrames(url, count);
   } finally {
     if (!isUrl) URL.revokeObjectURL(url);
   }
@@ -27,29 +25,38 @@ function extractFrames(url: string, count: number): Promise<string[]> {
     video.preload = "auto";
     video.playsInline = true;
     video.crossOrigin = "anonymous";
+    video.setAttribute("webkit-playsinline", "true");
     video.src = url;
+
+    let cleaned = false;
+    const cleanup = () => {
+      if (cleaned) return;
+      cleaned = true;
+      video.removeEventListener("error", onError);
+      video.pause();
+      video.src = "";
+      video.load();
+    };
 
     const onError = () => {
       cleanup();
       reject(new Error("影片載入失敗"));
     };
-
-    const cleanup = () => {
-      video.removeEventListener("error", onError);
-      video.removeEventListener("seeked", onSeeked);
-      video.src = "";
-      video.load();
-    };
-
     video.addEventListener("error", onError);
 
     const results: string[] = [];
     let idx = 0;
     let interval = 0;
     let thumbW = 0;
-    let thumbH = 60;
+    const thumbH = 60;
     let canvas: HTMLCanvasElement;
     let ctx: CanvasRenderingContext2D;
+
+    const seekTo = (time: number) => {
+      // 使用 one-shot seeked listener 避免殘留 listener 多次觸發
+      video.addEventListener("seeked", onSeeked, { once: true });
+      video.currentTime = Math.min(time, video.duration - 0.01);
+    };
 
     const captureNext = () => {
       if (idx >= count) {
@@ -57,34 +64,32 @@ function extractFrames(url: string, count: number): Promise<string[]> {
         resolve(results);
         return;
       }
-      const dur = video.duration;
       const targetTime = interval * idx + interval / 2;
-      video.currentTime = Math.min(targetTime, dur - 0.01);
+      seekTo(targetTime);
     };
 
     const onSeeked = () => {
-      // 確保影片有畫面可繪製 (行動端可能尚未解碼)
+      // 行動端可能 seeked 時尚未解碼 — 等待有足夠資料
       if (video.readyState < 2) {
-        const waitForData = () => {
-          video.removeEventListener("canplay", waitForData);
-          drawAndNext();
-        };
-        video.addEventListener("canplay", waitForData);
+        video.addEventListener("canplay", drawAndNext, { once: true });
         return;
       }
       drawAndNext();
     };
 
     const drawAndNext = () => {
-      ctx.drawImage(video, 0, 0, thumbW, thumbH);
-      results.push(canvas.toDataURL("image/jpeg", 0.5));
+      try {
+        ctx.drawImage(video, 0, 0, thumbW, thumbH);
+        results.push(canvas.toDataURL("image/jpeg", 0.5));
+      } catch {
+        // drawImage 可能因 CORS 或安全性限制失敗 — 跳過此幀
+        results.push("");
+      }
       idx++;
       captureNext();
     };
 
-    video.addEventListener("seeked", onSeeked);
-
-    video.addEventListener("loadedmetadata", () => {
+    video.addEventListener("loadedmetadata", async () => {
       const duration = video.duration;
       if (!duration || !isFinite(duration) || duration <= 0) {
         cleanup();
@@ -98,6 +103,14 @@ function extractFrames(url: string, count: number): Promise<string[]> {
       canvas.height = thumbH;
       ctx = canvas.getContext("2d")!;
       interval = duration / count;
+
+      // 行動端解鎖硬體解碼器：短暫 play → pause，確保 Canvas 能抓到非黑屏畫面
+      try {
+        await video.play();
+        video.pause();
+      } catch {
+        // 自動播放被阻擋時忽略，seek 仍可運作
+      }
 
       captureNext();
     });

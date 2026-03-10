@@ -52,6 +52,7 @@ export function TrimSlider({
   const handlePointerDown = useCallback(
     (target: "start" | "end") => (e: React.MouseEvent | React.TouchEvent) => {
       e.preventDefault();
+      e.stopPropagation();
       draggingRef.current = target;
       onDragStart?.();
     },
@@ -63,6 +64,7 @@ export function TrimSlider({
       const target = e.target as HTMLElement;
       if (target.closest(".trim-slider__thumb")) return;
       e.preventDefault();
+      e.stopPropagation();
       const pos = posFromEvent(e);
       onSeek(Math.max(startT, Math.min(endT, pos)));
       draggingRef.current = "seek";
@@ -75,7 +77,7 @@ export function TrimSlider({
     const handleMove = (e: MouseEvent | TouchEvent) => {
       const d = draggingRef.current;
       if (!d) return;
-      e.preventDefault();
+      if (e.cancelable) e.preventDefault();
       const pos = Math.round(posFromEvent(e) * 10) / 10;
       if (d === "start") {
         onStartChange(Math.max(0, Math.min(pos, endT - 0.1)));

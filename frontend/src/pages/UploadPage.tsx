@@ -175,7 +175,7 @@ export function UploadPage({ onImagesLoaded, onVideoLoaded }: UploadPageProps) {
     : null;
 
   return (
-    <div className="min-h-screen bg-sidebar flex flex-col items-center justify-center select-none">
+    <div className="min-h-[100dvh] bg-sidebar flex flex-col items-center justify-center select-none">
       {/* 警告 Toast */}
       {alert && (
         <div className="fixed top-6 left-1/2 -translate-x-1/2 z-50">

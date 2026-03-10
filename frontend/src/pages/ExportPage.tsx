@@ -558,7 +558,7 @@ export function ExportPage({
   };
 
   return (
-    <div className="h-screen flex overflow-hidden bg-sidebar layout-editor">
+    <div className="h-[100dvh] flex overflow-hidden bg-sidebar layout-editor">
       {/* 手機版 Header (Logo) */}
       <header className="hidden max-md:flex items-center justify-center bg-sidebar px-4 py-2">
         <button onClick={() => setShowResetModal(true)} className="cursor-pointer">
@@ -567,7 +567,7 @@ export function ExportPage({
       </header>
 
       {/* ===== 左側 Sidebar ===== */}
-      <aside className="w-[30%] min-w-[240px] max-w-[320px] flex flex-col h-screen sticky top-0 sidebar-scroll overflow-y-auto bg-sidebar max-md:h-auto">
+      <aside className="w-[30%] min-w-[240px] max-w-[320px] flex flex-col h-[100dvh] sticky top-0 sidebar-scroll overflow-y-auto bg-sidebar max-md:h-auto">
         {/* 頂部: 標題 (桌面版) */}
         <div className="p-4 pb-2 mx-auto mb-6 max-md:hidden">
           <button onClick={() => setShowResetModal(true)} className="cursor-pointer">
@@ -609,7 +609,7 @@ export function ExportPage({
         </div>
 
         {/* 底部: 下載 + 返回 */}
-        <div className="p-4 pt-0 flex flex-col gap-2">
+        <div className="p-4 pt-0 flex flex-col gap-2" style={{ paddingBottom: "max(16px, env(safe-area-inset-bottom))" }}>
           <button
             onClick={handleDownload}
             disabled={isDownloading}
@@ -633,7 +633,7 @@ export function ExportPage({
       </aside>
 
       {/* ===== 右側預覽區 ===== */}
-      <main className="flex-1 flex flex-col h-screen">
+      <main className="flex-1 flex flex-col h-[100dvh]">
         <div
           ref={previewContainerRef}
           className={`flex-1 bg-preview flex items-center justify-center m-4 rounded-lg overflow-hidden ${

@@ -2,6 +2,21 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ── 全站觸控鎖定 (全螢幕 App，禁止 body 捲動) ── */
+html, body, #root {
+  overflow: hidden;
+  height: 100%;
+  height: 100dvh;
+  overscroll-behavior: none;
+  -webkit-overflow-scrolling: auto;
+}
+
+/* 所有 range slider 禁止瀏覽器原生觸控捲動 */
+input[type="range"] {
+  touch-action: none;
+  user-select: none;
+}
+
 /* Custom range slider */
 input[type="range"].slider-dark {
   -webkit-appearance: none;
@@ -131,6 +146,7 @@ button:active:not(:disabled) {
   user-select: none;
   overflow: hidden;
   background: #1a1a1a;
+  touch-action: none;
 }
 
 /* 縮圖膠捲背景 */
@@ -183,6 +199,13 @@ button:active:not(:disabled) {
   border-radius: 3px;
   transition: box-shadow 0.15s;
   box-shadow: 0 0 6px rgba(0, 180, 255, 0.4);
+}
+
+/* 擴展觸控區 — 確保手指不會按偏 */
+.trim-slider__thumb::before {
+  content: "";
+  position: absolute;
+  inset: -10px -12px;
 }
 
 .trim-slider__thumb::after {
@@ -259,7 +282,12 @@ input[type="number"].input-vic:focus {
   }
 }
 
-/* 裁切框手把：透明擴展觸控區 (不改變定位上下文) */
+/* 裁切框手把：透明擴展觸控區 + 禁止原生捲動 */
+.crop-handle {
+  touch-action: none;
+  user-select: none;
+}
+
 .crop-handle::before {
   content: "";
   position: absolute;
@@ -282,6 +310,7 @@ input[type="number"].input-vic:focus {
     max-height: 45vh;
     order: 2;
     border-top: 1px solid rgba(255, 255, 255, 0.1);
+    overscroll-behavior: contain;
   }
 
   /* 手機版 header (Logo) */
