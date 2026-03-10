@@ -509,7 +509,7 @@ export function VideoExportPage({
 
   // ── 永遠渲染完整佈局 (不因 loading 而 early return) ──
   return (
-    <div className="h-screen flex overflow-hidden bg-sidebar layout-editor">
+    <div className="h-[100dvh] flex overflow-hidden bg-sidebar layout-editor">
       {/* 手機版 Header (Logo) */}
       <header className="hidden max-md:flex items-center justify-center bg-sidebar px-4 py-2">
         <button onClick={() => setShowResetModal(true)} className="cursor-pointer">
@@ -518,7 +518,7 @@ export function VideoExportPage({
       </header>
 
       {/* ===== 左側設定面板 ===== */}
-      <aside className="w-[30%] min-w-[240px] max-w-[320px] flex flex-col h-screen sidebar-scroll overflow-y-auto bg-sidebar max-md:h-auto">
+      <aside className="w-[30%] min-w-[240px] max-w-[320px] flex flex-col h-[100dvh] sidebar-scroll overflow-y-auto bg-sidebar max-md:h-auto">
         {/* Logo (桌面版) */}
         <div className="p-4 pb-2 mx-auto mb-6 max-md:hidden">
           <button onClick={() => setShowResetModal(true)} className="cursor-pointer">
@@ -863,7 +863,7 @@ export function VideoExportPage({
         </div>
 
         {/* 底部按鈕 */}
-        <div className="p-4 pt-0 flex flex-col gap-2">
+        <div className="p-4 pt-0 flex flex-col gap-2" style={{ paddingBottom: "max(16px, env(safe-area-inset-bottom))" }}>
           <button
             onClick={handleExport}
             disabled={exporting || !videoInfo}
@@ -889,7 +889,7 @@ export function VideoExportPage({
       </aside>
 
       {/* ===== 右側預覽區 (永遠渲染，previewRef 永遠在 DOM) ===== */}
-      <main className="flex-1 flex flex-col h-screen">
+      <main className="flex-1 flex flex-col h-[100dvh]">
         <div
           ref={previewRef}
           className="flex-1 flex items-center justify-center m-4 rounded-lg overflow-hidden relative"

@@ -254,7 +254,7 @@ export function ImageEditor({
     const handleMouseMove = (e: MouseEvent) => handleMove(e.clientX, e.clientY);
 
     const handleTouchMove = (e: TouchEvent) => {
-      e.preventDefault();
+      if (e.cancelable) e.preventDefault();
       if (e.touches.length === 2 && pinchRef.current.active) {
         // 雙指縮放
         const dx = e.touches[0].clientX - e.touches[1].clientX;
