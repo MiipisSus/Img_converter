@@ -926,9 +926,10 @@ export function VideoEditorPage({ video, onExport, onReset, initialState }: Vide
                     <span className="text-xs text-white/70 font-medium">保留音軌</span>
                     <button
                       onClick={handleToggleAudio}
-                      className={`relative w-10 h-[22px] rounded-full transition-colors duration-200 ${
+                      className={`toggle-switch relative shrink-0 w-10 h-[22px] rounded-full transition-colors duration-200 ${
                         includeAudio ? "bg-[#00B4FF]" : "bg-white/20"
                       }`}
+                      style={{ minWidth: 40, minHeight: 22 }}
                     >
                       <span
                         className={`absolute top-[3px] left-[3px] w-4 h-4 rounded-full bg-white shadow transition-transform duration-200 ${
@@ -995,7 +996,7 @@ export function VideoEditorPage({ video, onExport, onReset, initialState }: Vide
                   step={0.01}
                   value={transform.state.scale}
                   onChange={(e) => transform.setScale(parseFloat(e.target.value))}
-                  className="w-full slider-dark"
+                  className="w-full slider-vic"
                 />
               </div>
 
@@ -1174,6 +1175,7 @@ export function VideoEditorPage({ video, onExport, onReset, initialState }: Vide
               src={effectiveVideoSrc}
               className="max-w-full max-h-full"
               style={{
+                objectFit: "contain",
                 transform: defaultVideoTransform,
                 transition: "transform 0.4s cubic-bezier(0.4, 0, 0.2, 1)",
                 ...(isRotated90 ? { maxWidth: "100vh", maxHeight: "100vw" } : {}),

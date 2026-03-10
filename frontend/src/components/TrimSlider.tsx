@@ -30,18 +30,27 @@ export function TrimSlider({
 
   const toPercent = (v: number) => (duration > 0 ? (v / duration) * 100 : 0);
 
+  /** 從 mouse 或 touch 事件取得 clientX */
+  const clientXFromEvent = (e: MouseEvent | TouchEvent | React.MouseEvent | React.TouchEvent): number => {
+    if ("touches" in e) {
+      return e.touches.length > 0 ? e.touches[0].clientX : (e as TouchEvent).changedTouches[0].clientX;
+    }
+    return (e as MouseEvent).clientX;
+  };
+
   const posFromEvent = useCallback(
-    (e: MouseEvent | React.MouseEvent) => {
+    (e: MouseEvent | TouchEvent | React.MouseEvent | React.TouchEvent) => {
       const rect = trackRef.current?.getBoundingClientRect();
       if (!rect || duration <= 0) return 0;
-      const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+      const x = clientXFromEvent(e);
+      const ratio = Math.max(0, Math.min(1, (x - rect.left) / rect.width));
       return ratio * duration;
     },
     [duration],
   );
 
-  const handleMouseDown = useCallback(
-    (target: "start" | "end") => (e: React.MouseEvent) => {
+  const handlePointerDown = useCallback(
+    (target: "start" | "end") => (e: React.MouseEvent | React.TouchEvent) => {
       e.preventDefault();
       draggingRef.current = target;
       onDragStart?.();
@@ -49,10 +58,11 @@ export function TrimSlider({
     [onDragStart],
   );
 
-  const handleTrackMouseDown = useCallback(
-    (e: React.MouseEvent) => {
+  const handleTrackPointerDown = useCallback(
+    (e: React.MouseEvent | React.TouchEvent) => {
       const target = e.target as HTMLElement;
       if (target.closest(".trim-slider__thumb")) return;
+      e.preventDefault();
       const pos = posFromEvent(e);
       onSeek(Math.max(startT, Math.min(endT, pos)));
       draggingRef.current = "seek";
@@ -62,9 +72,10 @@ export function TrimSlider({
   );
 
   useEffect(() => {
-    const handleMouseMove = (e: MouseEvent) => {
+    const handleMove = (e: MouseEvent | TouchEvent) => {
       const d = draggingRef.current;
       if (!d) return;
+      e.preventDefault();
       const pos = Math.round(posFromEvent(e) * 10) / 10;
       if (d === "start") {
         onStartChange(Math.max(0, Math.min(pos, endT - 0.1)));
@@ -75,17 +86,23 @@ export function TrimSlider({
       }
     };
 
-    const handleMouseUp = () => {
+    const handleUp = () => {
       const d = draggingRef.current;
       draggingRef.current = null;
       if (d) onDragEnd?.(d);
     };
 
-    window.addEventListener("mousemove", handleMouseMove);
-    window.addEventListener("mouseup", handleMouseUp);
+    window.addEventListener("mousemove", handleMove);
+    window.addEventListener("mouseup", handleUp);
+    window.addEventListener("touchmove", handleMove, { passive: false });
+    window.addEventListener("touchend", handleUp);
+    window.addEventListener("touchcancel", handleUp);
     return () => {
-      window.removeEventListener("mousemove", handleMouseMove);
-      window.removeEventListener("mouseup", handleMouseUp);
+      window.removeEventListener("mousemove", handleMove);
+      window.removeEventListener("mouseup", handleUp);
+      window.removeEventListener("touchmove", handleMove);
+      window.removeEventListener("touchend", handleUp);
+      window.removeEventListener("touchcancel", handleUp);
     };
   }, [duration, startT, endT, posFromEvent, onStartChange, onEndChange, onSeek, onDragEnd]);
 
@@ -93,7 +110,13 @@ export function TrimSlider({
   const endPct = toPercent(endT);
 
   return (
-    <div className="trim-slider" ref={trackRef} onMouseDown={handleTrackMouseDown}>
+    <div
+      className="trim-slider"
+      ref={trackRef}
+      style={{ touchAction: "none" }}
+      onMouseDown={handleTrackPointerDown}
+      onTouchStart={handleTrackPointerDown}
+    >
       {/* 縮圖膠捲背景 */}
       {filmstrip.length > 0 && (
         <div className="trim-slider__filmstrip">
@@ -133,13 +156,15 @@ export function TrimSlider({
       <div
         className="trim-slider__thumb"
         style={{ left: `${startPct}%` }}
-        onMouseDown={handleMouseDown("start")}
+        onMouseDown={handlePointerDown("start")}
+        onTouchStart={handlePointerDown("start")}
       />
       {/* 右手把 */}
       <div
         className="trim-slider__thumb"
         style={{ left: `${endPct}%` }}
-        onMouseDown={handleMouseDown("end")}
+        onMouseDown={handlePointerDown("end")}
+        onTouchStart={handlePointerDown("end")}
       />
     </div>
   );

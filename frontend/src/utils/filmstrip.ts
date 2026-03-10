@@ -26,6 +26,7 @@ function extractFrames(url: string, count: number): Promise<string[]> {
     video.muted = true;
     video.preload = "auto";
     video.playsInline = true;
+    video.crossOrigin = "anonymous";
     video.src = url;
 
     const onError = () => {
@@ -35,11 +36,53 @@ function extractFrames(url: string, count: number): Promise<string[]> {
 
     const cleanup = () => {
       video.removeEventListener("error", onError);
+      video.removeEventListener("seeked", onSeeked);
       video.src = "";
       video.load();
     };
 
     video.addEventListener("error", onError);
+
+    const results: string[] = [];
+    let idx = 0;
+    let interval = 0;
+    let thumbW = 0;
+    let thumbH = 60;
+    let canvas: HTMLCanvasElement;
+    let ctx: CanvasRenderingContext2D;
+
+    const captureNext = () => {
+      if (idx >= count) {
+        cleanup();
+        resolve(results);
+        return;
+      }
+      const dur = video.duration;
+      const targetTime = interval * idx + interval / 2;
+      video.currentTime = Math.min(targetTime, dur - 0.01);
+    };
+
+    const onSeeked = () => {
+      // 確保影片有畫面可繪製 (行動端可能尚未解碼)
+      if (video.readyState < 2) {
+        const waitForData = () => {
+          video.removeEventListener("canplay", waitForData);
+          drawAndNext();
+        };
+        video.addEventListener("canplay", waitForData);
+        return;
+      }
+      drawAndNext();
+    };
+
+    const drawAndNext = () => {
+      ctx.drawImage(video, 0, 0, thumbW, thumbH);
+      results.push(canvas.toDataURL("image/jpeg", 0.5));
+      idx++;
+      captureNext();
+    };
+
+    video.addEventListener("seeked", onSeeked);
 
     video.addEventListener("loadedmetadata", () => {
       const duration = video.duration;
@@ -49,37 +92,12 @@ function extractFrames(url: string, count: number): Promise<string[]> {
         return;
       }
 
-      // Canvas 尺寸 — 小圖即可，高度固定 60px 按比例縮放
-      const thumbH = 60;
-      const thumbW = Math.round((video.videoWidth / video.videoHeight) * thumbH);
-      const canvas = document.createElement("canvas");
+      thumbW = Math.round((video.videoWidth / video.videoHeight) * thumbH);
+      canvas = document.createElement("canvas");
       canvas.width = thumbW;
       canvas.height = thumbH;
-      const ctx = canvas.getContext("2d")!;
-
-      const results: string[] = [];
-      let idx = 0;
-
-      // 每個等分的中心時間點
-      const interval = duration / count;
-
-      const captureNext = () => {
-        if (idx >= count) {
-          cleanup();
-          resolve(results);
-          return;
-        }
-
-        const targetTime = interval * idx + interval / 2;
-        video.currentTime = Math.min(targetTime, duration - 0.01);
-      };
-
-      video.addEventListener("seeked", () => {
-        ctx.drawImage(video, 0, 0, thumbW, thumbH);
-        results.push(canvas.toDataURL("image/jpeg", 0.5));
-        idx++;
-        captureNext();
-      });
+      ctx = canvas.getContext("2d")!;
+      interval = duration / count;
 
       captureNext();
     });
