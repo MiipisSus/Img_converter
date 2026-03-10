@@ -109,7 +109,7 @@ export function UploadPage({ onImagesLoaded, onVideoLoaded }: UploadPageProps) {
 
       const vf = videos[0];
       onVideoLoaded({
-        id: crypto.randomUUID(),
+        id: Math.random().toString(36).slice(2) + Date.now().toString(36),
         file: vf,
         name: vf.name,
         size: vf.size,

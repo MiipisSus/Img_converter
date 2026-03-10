@@ -67,7 +67,7 @@ export function loadImageFile(file: File): Promise<ImageItem> {
           : "png";
 
         resolve({
-          id: crypto.randomUUID(),
+          id: Math.random().toString(36).slice(2) + Date.now().toString(36),
           src,
           imgElement: img,
           pipelineState: initialPipeline,

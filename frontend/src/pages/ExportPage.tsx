@@ -827,7 +827,7 @@ function OutputSettingsPanel({
           </div>
           <button
             onClick={() => onUpdateSettings({ lockAspectRatio: !lockAspectRatio })}
-            className={`relative w-9 h-5 rounded-full transition-colors flex-shrink-0 ${
+            className={`toggle-switch relative w-9 h-5 rounded-full transition-colors flex-shrink-0 ${
               lockAspectRatio ? "bg-highlight" : "bg-white/20"
             }`}
           >
@@ -861,7 +861,7 @@ function OutputSettingsPanel({
           </div>
           <button
             onClick={onToggleUnified}
-            className={`relative w-9 h-5 rounded-full transition-colors flex-shrink-0 ${
+            className={`toggle-switch relative w-9 h-5 rounded-full transition-colors flex-shrink-0 ${
               unifiedOutput ? "bg-highlight" : "bg-white/20"
             }`}
           >
