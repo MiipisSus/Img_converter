@@ -212,6 +212,8 @@ export function VideoEditorPage({ video, onExport, onReset, initialState }: Vide
   }, [video.id, filmstripSrc]);
 
   // ── 追蹤預覽區域尺寸 (ResizeObserver) ──
+  // loading 作為依賴：初始 loading=true 時 clipAreaRef 未掛載（顯示載入畫面），
+  // loading→false 後才有 DOM 元素可觀察
   useEffect(() => {
     const el = clipAreaRef.current;
     if (!el) return;
@@ -223,7 +225,7 @@ export function VideoEditorPage({ video, onExport, onReset, initialState }: Vide
     });
     ro.observe(el);
     return () => ro.disconnect();
-  }, []);
+  }, [loading]);
 
   // ── 播放區間循環 (clip 模式)：到達 endT 時回到 startT 繼續播放 ──
   // 使用 trimRef 避免閉包捕獲舊值；拖曳中暫停循環邏輯
@@ -1111,7 +1113,7 @@ export function VideoEditorPage({ video, onExport, onReset, initialState }: Vide
 
       {/* ── 右側主要內容 ── */}
       <main className="flex-1 flex flex-col h-[100dvh]">
-        <div ref={clipAreaRef} className="flex-1 bg-preview/5 flex flex-col items-center justify-center m-4 max-md:m-2 mb-0 rounded-lg overflow-hidden relative">
+        <div ref={clipAreaRef} className={`flex-1 bg-preview/5 flex ${mode === "clip" ? "flex-col" : ""} items-center justify-center m-4 max-md:m-2 mb-0 rounded-lg overflow-hidden relative`}>
           {mode === "clip" && videoInfo ? (
             /* ── 剪輯工作區：上方裁切預覽 + 下方時間軸 ── */
             <>
@@ -1210,7 +1212,7 @@ export function VideoEditorPage({ video, onExport, onReset, initialState }: Vide
           ) : exportConfig && videoInfo && cropPreviewDims ? (
             /* ── 裁切預覽播放器 ── */
             <div
-              className="relative overflow-hidden"
+              className="relative overflow-hidden shrink-0"
               style={{
                 width: cropPreviewDims.width,
                 height: cropPreviewDims.height,
