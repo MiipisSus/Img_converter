@@ -1072,8 +1072,8 @@ export function VideoEditorPage({ video, onExport, onReset, initialState }: Vide
 
               {/* 時間區段 */}
               <div className="bg-white/10 rounded-[10px] p-3">
-                <p className="text-xs text-white/70 mb-2 font-medium">時間範圍</p>
-                <div className="grid grid-cols-2 gap-2 mb-3">
+                <p className="text-xs text-white/70 mb-2 font-medium max-md:hidden">時間範圍</p>
+                <div className="grid grid-cols-2 gap-2 mb-3 max-md:hidden">
                   <div className="bg-white/5 rounded-lg p-2 text-center">
                     <p className="text-[10px] text-white/40 mb-0.5">起點</p>
                     <p className="text-sm font-mono text-[#00B4FF]">{formatTime(startT)}</p>
@@ -1084,7 +1084,7 @@ export function VideoEditorPage({ video, onExport, onReset, initialState }: Vide
                   </div>
                 </div>
 
-                <div className="bg-white/5 rounded-lg p-2 mb-3">
+                <div className="max-md:bg-white/0 bg-white/5 rounded-lg p-2 max-md:mb-0 mb-3">
                   <div className="flex justify-between items-center">
                     <span className="text-xs text-white/50">輸出長度</span>
                     <span className="text-sm font-mono font-bold text-white">
@@ -1093,7 +1093,7 @@ export function VideoEditorPage({ video, onExport, onReset, initialState }: Vide
                   </div>
                 </div>
 
-                <div className="bg-white/5 rounded-lg p-2">
+                <div className="max-md:bg-white/0 bg-white/5 rounded-lg p-2">
                   <div className="flex justify-between items-center">
                     <span className="text-xs text-white/50">預估大小</span>
                     <span className="text-sm font-mono text-white/80">
@@ -1245,7 +1245,7 @@ export function VideoEditorPage({ video, onExport, onReset, initialState }: Vide
               <div ref={cropWrapperRef} className="flex-1 min-h-0 flex items-center justify-center w-full relative py-14 max-md:py-6">
                 {/* 操作模式切換 */}
                 <div
-                  className="absolute top-2 left-1/2 -translate-x-1/2 z-20 flex rounded-full p-0.5 gap-0.5 cursor-pointer select-none"
+                  className="absolute top-2 left-1/2 -translate-x-1/2 max-md:left-2 max-md:translate-x-0 z-20 flex rounded-full p-0.5 gap-0.5 cursor-pointer select-none"
                   style={{ background: "rgba(0,0,0,0.5)", backdropFilter: "blur(8px)", WebkitBackdropFilter: "blur(8px)" }}
                   onClick={() => setEditMode(editMode === "move-video" ? "move-crop" : "move-video")}
                   title={editMode === "move-video" ? "切換至移動裁切框" : "切換至移動影片"}
