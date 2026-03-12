@@ -166,6 +166,56 @@ export function useVideoTransform(options: UseVideoTransformOptions) {
     [],
   )
 
+  // ── resizeCropBoxLocked — 鎖定比例的裁切框調整 ──
+  const resizeCropBoxLocked = useCallback(
+    (handle: ResizeHandle, deltaX: number, deltaY: number, lockedRatio: number) => {
+      const { containerWidth: cW, containerHeight: cH, minCropSize: minCS = 50 } = optsRef.current
+
+      setState((prev) => {
+        let { cropX, cropY, cropW, cropH } = prev
+        const originalRight = cropX + cropW
+        const originalBottom = cropY + cropH
+
+        // 根據 handle 決定主軸 delta
+        let d: number
+        switch (handle) {
+          case 'se': d = Math.abs(deltaX) > Math.abs(deltaY) ? deltaX : deltaY * lockedRatio; cropW += d; cropH = cropW / lockedRatio; break
+          case 'sw': d = Math.abs(deltaX) > Math.abs(deltaY) ? -deltaX : deltaY * lockedRatio; cropW += d; cropX = originalRight - cropW; cropH = cropW / lockedRatio; break
+          case 'ne': d = Math.abs(deltaX) > Math.abs(deltaY) ? deltaX : -deltaY * lockedRatio; cropW += d; cropH = cropW / lockedRatio; cropY = originalBottom - cropH; break
+          case 'nw': d = Math.abs(deltaX) > Math.abs(deltaY) ? -deltaX : -deltaY * lockedRatio; cropW += d; cropX = originalRight - cropW; cropH = cropW / lockedRatio; cropY = originalBottom - cropH; break
+          case 'e': cropW += deltaX; cropH = cropW / lockedRatio; break
+          case 'w': cropW -= deltaX; cropX = originalRight - cropW; cropH = cropW / lockedRatio; break
+          case 'n': cropH -= deltaY; cropY = originalBottom - cropH; cropW = cropH * lockedRatio; break
+          case 's': cropH += deltaY; cropW = cropH * lockedRatio; break
+        }
+
+        // 邊界檢查
+        if (cropX < 0) { cropX = 0; cropW = originalRight }
+        if (cropY < 0) { cropY = 0; cropH = originalBottom }
+        if (cropX + cropW > cW) { cropW = cW - cropX }
+        if (cropY + cropH > cH) { cropH = cH - cropY }
+
+        // 修正比例（以較小邊為基準）
+        if (cropW / cropH > lockedRatio) {
+          cropW = cropH * lockedRatio
+        } else {
+          cropH = cropW / lockedRatio
+        }
+
+        // 修正位置
+        if (handle.includes('w')) cropX = originalRight - cropW
+        if (handle.includes('n')) cropY = originalBottom - cropH
+
+        // 最小尺寸
+        if (cropW < minCS) { cropW = minCS; cropH = cropW / lockedRatio }
+        if (cropH < minCS) { cropH = minCS; cropW = cropH * lockedRatio }
+
+        return { ...prev, cropX, cropY, cropW, cropH }
+      })
+    },
+    [],
+  )
+
   // ── setCropBox ──
   const setCropBox = useCallback(
     (crop: { cropX?: number; cropY?: number; cropW?: number; cropH?: number }) => {
@@ -218,6 +268,7 @@ export function useVideoTransform(options: UseVideoTransformOptions) {
     setTranslate,
     clampPosition,
     resizeCropBox,
+    resizeCropBoxLocked,
     setCropBox,
     reset,
     restoreState,
