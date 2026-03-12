@@ -282,6 +282,10 @@ export function UploadPage({ onImagesLoaded, onVideoLoaded }: UploadPageProps) {
           className="hidden"
         />
       </div>
+      {/* 版本號 */}
+      <span className="fixed right-4 bottom-4 text-xs text-white/20 select-none">
+        {__APP_VERSION__}
+      </span>
       {/* Buy Me a Coffee */}
       <a
         href="https://www.buymeacoffee.com/miipissus"
