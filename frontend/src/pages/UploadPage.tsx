@@ -266,7 +266,7 @@ export function UploadPage({ onImagesLoaded, onVideoLoaded }: UploadPageProps) {
                 <p className="text-sm text-gray-500">
                   影片 / GIF：MP4, WebM, AVI, MOV, GIF（單一檔案）
                 </p>
-                <p className="text-xs text-gray-600 mt-1">
+                <p className="text-xs text-highlight mt-1">
                   最大可上傳 50MB
                 </p>
               </>
