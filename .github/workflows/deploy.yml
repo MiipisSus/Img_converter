@@ -22,18 +22,8 @@ jobs:
       - name: Print release version
         run: echo "Deploying version $TAG_NAME"
 
-      - name: Debug SSH key format
-        run: |
-          echo "${{ secrets.GCP_SSH_KEY }}" > /tmp/test_key
-          echo "=== Key first line ==="
-          head -1 /tmp/test_key
-          echo "=== Key last line ==="
-          tail -1 /tmp/test_key
-          echo "=== Key line count ==="
-          wc -l /tmp/test_key
-          echo "=== Key byte count ==="
-          wc -c /tmp/test_key
-          rm /tmp/test_key
+      - name: Print release version
+        run: echo "Deploying version $TAG_NAME"
 
       - name: Deploy via SSH
         uses: appleboy/ssh-action@v1
