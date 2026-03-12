@@ -1243,37 +1243,30 @@ export function VideoEditorPage({ video, onExport, onReset, initialState }: Vide
               {/* 裁切預覽區 — flex-1 佔滿剩餘空間，內部置中 */}
               <div ref={cropWrapperRef} className="flex-1 min-h-0 flex items-center justify-center w-full relative">
                 {/* 操作模式切換 */}
-                <div className="absolute top-2 left-1/2 -translate-x-1/2 z-20 flex rounded-full p-0.5 gap-0.5" style={{ background: "rgba(0,0,0,0.5)", backdropFilter: "blur(8px)", WebkitBackdropFilter: "blur(8px)" }}>
-                  <button
-                    onClick={() => setEditMode("move-video")}
-                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-all ${
-                      editMode === "move-video"
-                        ? "bg-[#00B4FF] text-white shadow"
-                        : "text-white/60 hover:text-white"
-                    }`}
-                    title="移動影片"
-                  >
+                <div
+                  className="absolute top-2 left-1/2 -translate-x-1/2 z-20 flex rounded-full p-0.5 gap-0.5 cursor-pointer"
+                  style={{ background: "rgba(0,0,0,0.5)", backdropFilter: "blur(8px)", WebkitBackdropFilter: "blur(8px)" }}
+                  onClick={() => setEditMode(editMode === "move-video" ? "move-crop" : "move-video")}
+                  title={editMode === "move-video" ? "切換至移動裁切框" : "切換至移動影片"}
+                >
+                  <span className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-all pointer-events-none ${
+                    editMode === "move-video" ? "bg-[#00B4FF] text-white shadow" : "text-white/60"
+                  }`}>
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                       <path d="M18 11V6a2 2 0 0 0-2-2a2 2 0 0 0-2 2v1M14 10V4a2 2 0 0 0-2-2a2 2 0 0 0-2 2v6M10 10.5V6a2 2 0 0 0-2-2a2 2 0 0 0-2 2v8" />
                       <path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8H12a8 8 0 0 1-6.3-3.1" />
                     </svg>
                     <span className="max-md:hidden">移動影片</span>
-                  </button>
-                  <button
-                    onClick={() => setEditMode("move-crop")}
-                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-all ${
-                      editMode === "move-crop"
-                        ? "bg-[#00B4FF] text-white shadow"
-                        : "text-white/60 hover:text-white"
-                    }`}
-                    title="移動裁切框"
-                  >
+                  </span>
+                  <span className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-all pointer-events-none ${
+                    editMode === "move-crop" ? "bg-[#00B4FF] text-white shadow" : "text-white/60"
+                  }`}>
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                       <path d="M5 3l4 0 0 4M19 3l-4 0 0 4M5 21l4 0 0-4M19 21l-4 0 0-4" />
                       <rect x="7" y="7" width="10" height="10" strokeDasharray="3 3" />
                     </svg>
                     <span className="max-md:hidden">移動裁切框</span>
-                  </button>
+                  </span>
                 </div>
               <div
                 className="relative select-none flex-shrink-0"

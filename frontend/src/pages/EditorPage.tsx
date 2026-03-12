@@ -878,37 +878,30 @@ export function EditorPage({
 
           {/* 操作模式切換 (crop mode only) */}
           {mode === "crop" && (
-            <div className="absolute top-2 left-1/2 -translate-x-1/2 z-20 flex rounded-full p-0.5 gap-0.5" style={{ background: "rgba(0,0,0,0.5)", backdropFilter: "blur(8px)", WebkitBackdropFilter: "blur(8px)" }}>
-              <button
-                onClick={() => setImgEditMode("move-image")}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-all ${
-                  imgEditMode === "move-image"
-                    ? "bg-highlight text-black shadow"
-                    : "text-white/60 hover:text-white"
-                }`}
-                title="移動圖片"
-              >
+            <div
+              className="absolute top-2 left-1/2 -translate-x-1/2 z-20 flex rounded-full p-0.5 gap-0.5 cursor-pointer"
+              style={{ background: "rgba(0,0,0,0.5)", backdropFilter: "blur(8px)", WebkitBackdropFilter: "blur(8px)" }}
+              onClick={() => setImgEditMode(imgEditMode === "move-image" ? "move-crop" : "move-image")}
+              title={imgEditMode === "move-image" ? "切換至移動裁切框" : "切換至移動圖片"}
+            >
+              <span className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-all pointer-events-none ${
+                imgEditMode === "move-image" ? "bg-highlight text-black shadow" : "text-white/60"
+              }`}>
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M18 11V6a2 2 0 0 0-2-2a2 2 0 0 0-2 2v1M14 10V4a2 2 0 0 0-2-2a2 2 0 0 0-2 2v6M10 10.5V6a2 2 0 0 0-2-2a2 2 0 0 0-2 2v8" />
                   <path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8H12a8 8 0 0 1-6.3-3.1" />
                 </svg>
                 <span className="max-md:hidden">移動圖片</span>
-              </button>
-              <button
-                onClick={() => setImgEditMode("move-crop")}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-all ${
-                  imgEditMode === "move-crop"
-                    ? "bg-highlight text-black shadow"
-                    : "text-white/60 hover:text-white"
-                }`}
-                title="移動裁切框"
-              >
+              </span>
+              <span className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-all pointer-events-none ${
+                imgEditMode === "move-crop" ? "bg-highlight text-black shadow" : "text-white/60"
+              }`}>
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M5 3l4 0 0 4M19 3l-4 0 0 4M5 21l4 0 0-4M19 21l-4 0 0-4" />
                   <rect x="7" y="7" width="10" height="10" strokeDasharray="3 3" />
                 </svg>
                 <span className="max-md:hidden">移動裁切框</span>
-              </button>
+              </span>
             </div>
           )}
         </div>
