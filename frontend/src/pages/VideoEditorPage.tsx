@@ -1247,25 +1247,31 @@ export function VideoEditorPage({ video, onExport, onReset, initialState }: Vide
                   />
                 </div>
 
-                {/* 比例鎖定按鈕 — 容器右上角 */}
+                {/* 比例鎖定按鈕 — 跟隨裁切框右上角 */}
                 <button
                   onClick={() => {
                     if (isRatioLocked) {
                       setIsRatioLocked(false);
                       lockedRatioRef.current = null;
+                      setSelectedCropRatio(null);
                     } else if (cropW > 0 && cropH > 0) {
                       setIsRatioLocked(true);
                       lockedRatioRef.current = cropW / cropH;
                     }
                   }}
-                  className={`absolute top-2 right-2 z-10 w-8 h-8 flex items-center justify-center rounded-full transition-all ${
+                  className={`absolute z-10 w-7 h-7 flex items-center justify-center rounded-full transition-colors ${
                     isRatioLocked
                       ? "bg-[#00B4FF] text-white shadow-lg shadow-[#00B4FF]/30"
                       : "bg-black/50 text-white/60 hover:text-white hover:bg-black/70"
                   }`}
+                  style={{
+                    left: cropX + cropW - 40,
+                    top: cropY + 14,
+                    transition: cropTransition !== "none" ? "left 0.4s cubic-bezier(0.4,0,0.2,1), top 0.4s cubic-bezier(0.4,0,0.2,1)" : "none",
+                  }}
                   title={isRatioLocked ? "解鎖比例" : "鎖定比例"}
                 >
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     {isRatioLocked ? (
                       <>
                         <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
