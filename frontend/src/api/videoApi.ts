@@ -113,10 +113,11 @@ export interface CompressOptions {
   crop_h?: number;
 }
 
-/** 提交影片壓縮任務 */
+/** 提交影片壓縮任務（支援上傳進度回報） */
 export async function submitCompress(
   file: File,
   opts: CompressOptions = {},
+  onUploadProgress?: (pct: number) => void,
 ): Promise<TaskSubmitResult> {
   const fd = new FormData();
   fd.append("video", file);
@@ -124,17 +125,38 @@ export async function submitCompress(
     if (v !== undefined) fd.append(k, String(v));
   }
 
-  const res = await fetch(`${API_BASE}/videos/compress`, {
-    method: "POST",
-    body: fd,
+  return new Promise<TaskSubmitResult>((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", `${API_BASE}/videos/compress`);
+
+    if (onUploadProgress) {
+      xhr.upload.addEventListener("progress", (e) => {
+        if (e.lengthComputable && e.total > 0) {
+          onUploadProgress(Math.round((e.loaded / e.total) * 100));
+        }
+      });
+    }
+
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        try {
+          resolve(JSON.parse(xhr.responseText));
+        } catch {
+          reject(new Error("解析回應失敗"));
+        }
+      } else {
+        try {
+          const err = JSON.parse(xhr.responseText);
+          reject(new Error(err.detail || `HTTP ${xhr.status}`));
+        } catch {
+          reject(new Error(`HTTP ${xhr.status}`));
+        }
+      }
+    };
+
+    xhr.onerror = () => reject(new Error("網路錯誤"));
+    xhr.send(fd);
   });
-
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ detail: "提交任務失敗" }));
-    throw new Error(err.detail || `HTTP ${res.status}`);
-  }
-
-  return res.json();
 }
 
 /** 查詢任務狀態 */

@@ -420,13 +420,19 @@ export function VideoExportPage({
   }, [presetSocialKB, presetCompressKB, setTargetFromKB]);
 
   // ── 匯出 ──
+  // 進度分段：上傳 0-10%，後端處理 10-95%，完成 100%
+  const lastPollProgressRef = useRef(0);
+  const lastProgressUpdateRef = useRef(0);
+
   const handleExport = useCallback(async () => {
     if (!videoInfo) return;
     setExporting(true);
-    setProgress(0);
-    setStepLabel("Step 1/3: 裁剪與旋轉...");
+    setProgress(5); // 初始 5%，避免長時間卡在 0%
+    setStepLabel("正在上傳影片...");
     setError(null);
     setOutputInfo(null);
+    lastPollProgressRef.current = 0;
+    lastProgressUpdateRef.current = Date.now();
 
     try {
       const result = await submitCompress(video.file, {
@@ -444,36 +450,53 @@ export function VideoExportPage({
         target_w: targetWidth,
         include_audio: includeAudio,
         quality_preset: encodingPreset,
+      }, (uploadPct) => {
+        // 上傳進度映射到 5-10%
+        const mapped = 5 + Math.round(uploadPct * 0.05);
+        setProgress(mapped);
       });
 
       setTaskId(result.task_id);
+      setProgress(10);
+      setStepLabel("正在處理影片...");
 
       pollRef.current = setInterval(async () => {
         try {
           const status = await getTaskStatus(result.task_id);
-          setProgress(status.progress);
 
-          if (status.progress < 10) {
-            setStepLabel("Step 1/3: 裁剪與旋轉...");
-          } else if (status.progress < 90) {
-            setStepLabel("Step 2/3: 影像壓縮中...");
-          } else {
-            setStepLabel("Step 3/3: 封裝檔案...");
-          }
+          // 節流：每 200ms 或進度變動 >= 1% 才更新 UI
+          const now = Date.now();
+          const backendPct = status.progress;
+          const delta = backendPct - lastPollProgressRef.current;
+          const elapsed = now - lastProgressUpdateRef.current;
 
           if (status.status === "completed") {
             clearInterval(pollRef.current);
             pollRef.current = undefined;
+            setProgress(100);
+            setStepLabel("匯出完成");
             setOutputInfo(status);
             setExporting(false);
-            setProgress(100);
-            setStepLabel("完成");
-          }
-          if (status.status === "failed") {
+          } else if (status.status === "failed") {
             clearInterval(pollRef.current);
             pollRef.current = undefined;
             setError(status.error ?? "處理失敗");
             setExporting(false);
+          } else if (delta >= 1 || elapsed >= 200) {
+            // 後端進度 0-100 映射到 UI 10-95%
+            const mapped = 10 + Math.round(backendPct * 0.85);
+            setProgress(mapped);
+            lastPollProgressRef.current = backendPct;
+            lastProgressUpdateRef.current = now;
+
+            // 動態步驟文字
+            if (backendPct < 5) {
+              setStepLabel("正在處理影片...");
+            } else if (backendPct < 90) {
+              setStepLabel(`正在匯出影片... ${mapped}%`);
+            } else {
+              setStepLabel("正在封裝檔案...");
+            }
           }
         } catch {
           // 單次 poll 失敗不中斷
@@ -1096,14 +1119,16 @@ export function VideoExportPage({
               />
             </div>
 
-            {/* 步驟文字 */}
+            {/* 步驟文字 + 百分比 */}
             <div className="flex items-center justify-between">
               <span className="text-sm text-white/70">
                 {exporting ? stepLabel : "匯出完成"}
               </span>
-              <span className="text-sm font-mono text-white/50">
-                {progress}%
-              </span>
+              {exporting && (
+                <span className="text-sm font-mono text-white/50">
+                  {progress}%
+                </span>
+              )}
             </div>
           </div>
         )}
