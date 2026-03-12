@@ -193,6 +193,12 @@ export function useVideoTransform(options: UseVideoTransformOptions) {
     })
   }, [])
 
+  // ── forceState — 直接設定完整狀態，不做 clamp ──
+  // 用於初始化階段：caller 確保狀態有效，且 optsRef 可能尚未更新
+  const forceState = useCallback((newState: VideoTransformState) => {
+    setState(newState)
+  }, [])
+
   // ── CSS transform ──
   const videoTransform = useMemo(() => {
     const { translateX: tx, translateY: ty, scale: s } = state
@@ -210,5 +216,6 @@ export function useVideoTransform(options: UseVideoTransformOptions) {
     setCropBox,
     reset,
     restoreState,
+    forceState,
   }
 }

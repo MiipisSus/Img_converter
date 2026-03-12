@@ -104,6 +104,7 @@ export function VideoEditorPage({ video, onExport, onReset, initialState }: Vide
   const videoRef = useRef<HTMLVideoElement>(null);
   const videoUrlRef = useRef<string>("");
   const clipAreaRef = useRef<HTMLDivElement>(null);
+  const cropWrapperRef = useRef<HTMLDivElement>(null);
   const dragStartRef = useRef({ x: 0, y: 0, translateX: 0, translateY: 0, cropX: 0, cropY: 0, cropW: 0, cropH: 0 });
   const pinchRef = useRef({ active: false, startDist: 0, startScale: 1 });
 
@@ -356,32 +357,38 @@ export function VideoEditorPage({ video, onExport, onReset, initialState }: Vide
   // 剪輯模式 — 統一的時間 + 空間操作
   // ─────────────────────────────────────────────
 
-  // ── 根據預覽區實際大小計算裁切容器尺寸 ──
-  const recalcCropContainer = useCallback((vW: number, vH: number) => {
-    const el = clipAreaRef.current;
-    if (!el) return;
-    const rect = el.getBoundingClientRect();
-    const isMobileView = window.innerWidth < 768;
-    // 時間軸實際高度：TrimSlider(48) + padding + gap + 播放按鈕列(36)
-    const timelineReserve = isMobileView ? 110 : 120;
-    const availW = rect.width - (isMobileView ? 16 : 0);
-    const availH = rect.height - timelineReserve;
-
+  // ── 測量裁切可用空間並計算容器尺寸 ──
+  // 優先用 cropWrapperRef（精確），fallback 到 clipAreaRef - timelineReserve
+  // 回傳計算值供呼叫方同步使用，同時寫入 state
+  const measureCropContainer = useCallback((vW: number, vH: number): { width: number; height: number } | null => {
+    let availW: number, availH: number;
+    const wrapper = cropWrapperRef.current;
+    if (wrapper) {
+      const rect = wrapper.getBoundingClientRect();
+      availW = rect.width;
+      availH = rect.height;
+    } else {
+      const el = clipAreaRef.current;
+      if (!el) return null;
+      const rect = el.getBoundingClientRect();
+      const isMobileView = window.innerWidth < 768;
+      const timelineReserve = isMobileView ? 110 : 120;
+      availW = rect.width - (isMobileView ? 16 : 0);
+      availH = rect.height - timelineReserve;
+    }
     const M = Math.min(availW / vW, availH / vH);
-    const cW = Math.round(vW * M);
-    const cH = Math.round(vH * M);
-    setCropContainerSize({ width: cW, height: cH });
+    // 不做 Math.round — 保持浮點精度，確保 displayMultiplier === M
+    const dims = { width: vW * M, height: vH * M };
+    setCropContainerSize(dims);
+    return dims;
   }, []);
 
   // ── 進入剪輯模式 ──
   const handleEnterClip = useCallback(() => {
     if (!videoInfo) return;
-    const el = clipAreaRef.current;
-    if (!el) return;
+    if (!clipAreaRef.current) return;
 
     // 擷取影片解析度
-    // GIF：使用 videoInfo（後端裁切原始 GIF，避免 MP4 預覽偶數修正偏差）
-    // 一般影片：使用瀏覽器 intrinsic（最準確）
     const vid = videoRef.current;
     const vW = isGifSource
       ? videoInfo.width
@@ -391,48 +398,49 @@ export function VideoEditorPage({ video, onExport, onReset, initialState }: Vide
       : ((vid && vid.videoHeight > 0) ? vid.videoHeight : videoInfo.height);
     setIntrinsicVideoSize({ w: vW, h: vH });
 
-    // 先用當前佈局計算初始尺寸
-    recalcCropContainer(vW, vH);
+    // 粗估初始尺寸（CSS class 尚未生效，RAF 後會用精確值覆蓋）
+    measureCropContainer(vW, vH);
     setMode("clip");
-    // 注意：不在此處 seek — 因為 setMode 會觸發 video 元素重建，
-    // seek 和 play 在 mode-change useEffect 中處理（新元素已掛載）
-  }, [videoInfo, recalcCropContainer]);
+  }, [videoInfo, measureCropContainer, isGifSource]);
 
-  // ── mode 變為 clip 後，等佈局穩定再重新測量容器 ──
+  // ── mode 變為 clip 後：等 CSS 生效 → 精確測量 → 初始化裁切框 ──
+  // 全部在 RAF 回調內一次完成，用計算出的精確尺寸直接設定，
+  // 徹底消除「setState→re-render→effect 讀到舊值」的時序問題
   useEffect(() => {
     if (mode !== "clip" || !intrinsicVideoSize) return;
-    // 等 clip-mode CSS 生效後重新測量
-    const raf = requestAnimationFrame(() => {
-      recalcCropContainer(intrinsicVideoSize.w, intrinsicVideoSize.h);
-    });
-    return () => cancelAnimationFrame(raf);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mode]);
 
-  // 進入 clip 模式後：恢復已儲存的狀態 或 完整重置
-  const prevModeRef = useRef<EditorMode>("default");
-  useEffect(() => {
-    if (mode === "clip" && prevModeRef.current !== "clip") {
+    const raf = requestAnimationFrame(() => {
+      const vW = intrinsicVideoSize.w;
+      const vH = intrinsicVideoSize.h;
+
+      // 1. 精確測量（clip-mode CSS 已生效，cropWrapperRef 已掛載）
+      const dims = measureCropContainer(vW, vH);
+      if (!dims) return;
+      const cW = dims.width;
+      const cH = dims.height;
+
+      // 2. 用精確尺寸直接初始化裁切框
+      //    使用 forceState（不做 clamp）— 此時 optsRef 尚未更新，
+      //    clamp 會用舊的 containerWidth/Height 導致 translate 偏移
       if (savedClipState && exportConfig) {
-        // 從已確認的配置恢復 — 重新計算 UI 座標以適應可能改變的容器尺寸
         const restored = reconstructTransformFromCrop(
           { x: exportConfig.crop_x, y: exportConfig.crop_y,
             width: exportConfig.crop_w, height: exportConfig.crop_h },
           savedClipState.scale,
-          effectiveVideoW,
-          effectiveVideoH,
-          cropContainerSize.width,
-          cropContainerSize.height,
+          vW, vH, cW, cH,
         );
-        transform.restoreState(restored);
+        transform.forceState(restored);
         setSelectedCropRatio(savedClipState.cropRatio);
-        console.log("[Clip Restore] 從儲存狀態恢復:", JSON.stringify(restored));
       } else {
-        // 首次進入，完整重置
-        transform.reset();
+        // 首次進入：裁切框 = 容器全域 (cropX=0, cropY=0, cropW=cW, cropH=cH)
+        transform.forceState({
+          scale: 1, translateX: 0, translateY: 0,
+          cropX: 0, cropY: 0, cropW: cW, cropH: cH,
+        });
         setSelectedCropRatio(null);
       }
-      // 在下一幀 seek 到 startT 並開始播放 (確保 video ref 已掛載)
+
+      // 3. 下一幀 seek + play
       requestAnimationFrame(() => {
         const vid = videoRef.current;
         if (vid) {
@@ -442,9 +450,10 @@ export function VideoEditorPage({ video, onExport, onReset, initialState }: Vide
           vid.play();
         }
       });
-    }
-    prevModeRef.current = mode;
-  }, [mode, savedClipState, exportConfig, effectiveVideoW, effectiveVideoH, cropContainerSize, transform, startT]);
+    });
+    return () => cancelAnimationFrame(raf);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode]);
 
   // ── 套用剪輯 — 同時輸出時間 + 空間參數 ──
   const handleConfirmClip = useCallback(() => {
@@ -1107,7 +1116,7 @@ export function VideoEditorPage({ video, onExport, onReset, initialState }: Vide
             /* ── 剪輯工作區：上方裁切預覽 + 下方時間軸 ── */
             <>
               {/* 裁切預覽區 — flex-1 佔滿剩餘空間，內部置中 */}
-              <div className="flex-1 min-h-0 flex items-center justify-center w-full">
+              <div ref={cropWrapperRef} className="flex-1 min-h-0 flex items-center justify-center w-full">
               <div
                 className="relative select-none flex-shrink-0"
                 style={{
