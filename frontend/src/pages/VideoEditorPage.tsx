@@ -1237,7 +1237,7 @@ export function VideoEditorPage({ video, onExport, onReset, initialState }: Vide
 
       {/* ── 右側主要內容 ── */}
       <main className="flex-1 flex flex-col h-[100dvh]">
-        <div ref={clipAreaRef} className={`flex-1 bg-preview/5 flex ${mode === "clip" ? "flex-col" : ""} items-center justify-center m-4 max-md:m-2 mb-0 rounded-lg overflow-hidden relative`}>
+        <div ref={clipAreaRef} className={`flex-1 bg-preview/5 flex ${mode === "clip" ? "flex-col" : "p-8 max-md:p-4"} items-center justify-center m-4 max-md:m-2 mb-0 rounded-lg overflow-hidden relative`}>
           {mode === "clip" && videoInfo ? (
             /* ── 剪輯工作區：上方裁切預覽 + 下方時間軸 ── */
             <>
@@ -1457,16 +1457,6 @@ export function VideoEditorPage({ video, onExport, onReset, initialState }: Vide
           )}
         </div>
 
-        {/* 底部控制區 (僅預設模式) */}
-        {mode === "default" && (
-          <div className="shrink-0 px-6 py-4">
-            <div className="flex items-center justify-center py-2">
-              <span className="text-xs text-white/30">
-                選擇左側工具開始編輯
-              </span>
-            </div>
-          </div>
-        )}
       </main>
 
       <ConfirmModal
