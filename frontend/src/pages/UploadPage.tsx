@@ -215,7 +215,7 @@ export function UploadPage({ onImagesLoaded, onVideoLoaded }: UploadPageProps) {
           onDrop={handleDrop}
         >
           <div
-            className={`w-[60vw] min-w-[320px] max-w-[800px] h-[50vh] min-h-[200px] max-h-[600px] rounded-2xl border-2 border-dashed flex flex-col items-center justify-center gap-4 transition-all duration-200 ${
+            className={`w-[60vw] min-w-[320px] max-w-[800px] max-md:min-w-0 max-md:w-[calc(100vw-2rem)] h-[50vh] min-h-[200px] max-h-[600px] rounded-2xl border-2 border-dashed flex flex-col items-center justify-center gap-4 px-6 transition-all duration-200 ${
               dragHint === "image"
                 ? "border-highlight bg-highlight/10 scale-[1.02]"
                 : dragHint === "video"
@@ -265,6 +265,9 @@ export function UploadPage({ onImagesLoaded, onVideoLoaded }: UploadPageProps) {
                 </p>
                 <p className="text-sm text-gray-500">
                   影片 / GIF：MP4, WebM, AVI, MOV, GIF（單一檔案）
+                </p>
+                <p className="text-xs text-gray-600 mt-1">
+                  最大可上傳 50MB
                 </p>
               </>
             )}

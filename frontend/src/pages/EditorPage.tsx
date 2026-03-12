@@ -907,7 +907,7 @@ export function EditorPage({
         </div>
 
         {/* 縮圖列表 — 固定高度，含追加按鈕 */}
-        <div className={`h-[120px] max-md:h-[80px] shrink-0 w-full overflow-x-auto thumbnail-scroll px-3 py-1.5 max-md:px-2 flex items-center gap-2 max-md:gap-1.5 transition-opacity ${mode === "crop" ? "opacity-40 pointer-events-none" : ""}`}>
+        <div className={`h-[120px] max-md:h-[80px] shrink-0 w-full overflow-x-auto thumbnail-scroll px-3 py-1.5 max-md:px-2 flex items-center gap-2 max-md:gap-1.5 transition-opacity ${mode === "crop" ? "opacity-40 pointer-events-none max-md:hidden" : ""}`}>
           {/* 追加圖片按鈕 (固定最左側) */}
           <button
             onClick={() => appendInputRef.current?.click()}
