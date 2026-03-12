@@ -843,7 +843,7 @@ export function EditorPage({
       {/* ===== 右側預覽區 ===== */}
       <main className="flex-1 flex flex-col h-[100dvh]">
         {/* 圖片預覽區 — flex-1 佔滿剩餘空間 */}
-        <div ref={previewContainerRef} className="flex-1 bg-preview flex items-center justify-center m-4 mb-0 rounded-lg overflow-hidden relative">
+        <div ref={previewContainerRef} className="flex-1 bg-preview flex items-center justify-center m-4 mb-0 rounded-lg overflow-hidden relative py-14 max-md:py-6">
           {mode === "preview" ? (
             <PreviewWorkspace
               key={activeImageId}
