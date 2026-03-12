@@ -216,6 +216,41 @@ export function useVideoTransform(options: UseVideoTransformOptions) {
     [],
   )
 
+  // ── moveCropBox — 移動裁切框 (限制在影片顯示範圍內) ──
+  const moveCropBox = useCallback(
+    (deltaX: number, deltaY: number) => {
+      const { containerWidth: cW, containerHeight: cH } = optsRef.current
+
+      setState((prev) => {
+        const { scale, translateX: tx, translateY: ty, cropW, cropH } = prev
+        const { videoWidth: vW, videoHeight: vH } = optsRef.current
+        const M = MRef.current
+
+        // 影片視覺邊界
+        const vw = vW * M * scale
+        const vh = vH * M * scale
+        const videoLeft = (cW - vw) / 2 + tx
+        const videoTop = (cH - vh) / 2 + ty
+        const videoRight = videoLeft + vw
+        const videoBottom = videoTop + vh
+
+        // 裁切框可活動範圍：影片邊界與容器邊界的交集
+        const minX = Math.max(videoLeft, 0)
+        const minY = Math.max(videoTop, 0)
+        const maxX = Math.min(videoRight, cW) - cropW
+        const maxY = Math.min(videoBottom, cH) - cropH
+
+        let newX = prev.cropX + deltaX
+        let newY = prev.cropY + deltaY
+        newX = Math.max(minX, Math.min(maxX, newX))
+        newY = Math.max(minY, Math.min(maxY, newY))
+
+        return { ...prev, cropX: newX, cropY: newY }
+      })
+    },
+    [],
+  )
+
   // ── setCropBox ──
   const setCropBox = useCallback(
     (crop: { cropX?: number; cropY?: number; cropW?: number; cropH?: number }) => {
@@ -269,6 +304,7 @@ export function useVideoTransform(options: UseVideoTransformOptions) {
     clampPosition,
     resizeCropBox,
     resizeCropBoxLocked,
+    moveCropBox,
     setCropBox,
     reset,
     restoreState,

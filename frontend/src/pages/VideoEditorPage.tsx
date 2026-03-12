@@ -74,7 +74,10 @@ export function VideoEditorPage({ video, onExport, onReset, initialState }: Vide
   // ── 空間裁切 (clip 模式共用) ──
   const [cropContainerSize, setCropContainerSize] = useState({ width: 800, height: 600 });
   const [isDraggingVideo, setIsDraggingVideo] = useState(false);
+  const [isDraggingCropBox, setIsDraggingCropBox] = useState(false);
   const [isResizingCrop, setIsResizingCrop] = useState<CropResizeHandle | null>(null);
+  // 操作模式：移動影片 vs 移動裁切框
+  const [editMode, setEditMode] = useState<"move-video" | "move-crop">("move-video");
   const [isCropAnimating, setIsCropAnimating] = useState(false);
   const [isSnappingBack, setIsSnappingBack] = useState(false);
 
@@ -404,6 +407,7 @@ export function VideoEditorPage({ video, onExport, onReset, initialState }: Vide
 
     // 粗估初始尺寸（CSS class 尚未生效，RAF 後會用精確值覆蓋）
     measureCropContainer(vW, vH);
+    setEditMode("move-video");
     setMode("clip");
   }, [videoInfo, measureCropContainer, isGifSource]);
 
@@ -655,19 +659,32 @@ export function VideoEditorPage({ video, onExport, onReset, initialState }: Vide
     [transform.state.scale, transform.setScale],
   );
 
-  // ── 容器 mousedown (拖曳影片) ──
+  // ── 容器 mousedown (拖曳影片 or 裁切框) ──
   const handleCropContainerMouseDown = useCallback(
     (e: React.MouseEvent) => {
-      setIsDraggingVideo(true);
-      dragStartRef.current = {
-        x: e.clientX,
-        y: e.clientY,
-        translateX: transform.state.translateX,
-        translateY: transform.state.translateY,
-        cropX: 0, cropY: 0, cropW: 0, cropH: 0,
-      };
+      if (editMode === "move-crop") {
+        setIsDraggingCropBox(true);
+        dragStartRef.current = {
+          x: e.clientX,
+          y: e.clientY,
+          translateX: 0,
+          translateY: 0,
+          cropX: transform.state.cropX,
+          cropY: transform.state.cropY,
+          cropW: 0, cropH: 0,
+        };
+      } else {
+        setIsDraggingVideo(true);
+        dragStartRef.current = {
+          x: e.clientX,
+          y: e.clientY,
+          translateX: transform.state.translateX,
+          translateY: transform.state.translateY,
+          cropX: 0, cropY: 0, cropW: 0, cropH: 0,
+        };
+      }
     },
-    [transform.state.translateX, transform.state.translateY],
+    [editMode, transform.state.translateX, transform.state.translateY, transform.state.cropX, transform.state.cropY],
   );
 
   // ── Handle mousedown (調整裁切框) ──
@@ -709,7 +726,7 @@ export function VideoEditorPage({ video, onExport, onReset, initialState }: Vide
     [transform.state.cropX, transform.state.cropY, transform.state.cropW, transform.state.cropH],
   );
 
-  // ── 觸控：拖動影片 / 雙指縮放 ──
+  // ── 觸控：拖動影片/裁切框 / 雙指縮放 ──
   const handleCropContainerTouchStart = useCallback(
     (e: React.TouchEvent) => {
       e.stopPropagation();
@@ -723,17 +740,32 @@ export function VideoEditorPage({ video, onExport, onReset, initialState }: Vide
         };
       } else if (e.touches.length === 1) {
         const touch = e.touches[0];
-        setIsDraggingVideo(true);
-        dragStartRef.current = {
-          x: touch.clientX,
-          y: touch.clientY,
-          translateX: transform.state.translateX,
-          translateY: transform.state.translateY,
-          cropX: 0, cropY: 0, cropW: 0, cropH: 0,
-        };
+        // 觸控偏移：手指上方 20px 處為實際操作點，避免手指遮擋
+        const touchOffsetY = editMode === "move-crop" ? -20 : 0;
+        if (editMode === "move-crop") {
+          setIsDraggingCropBox(true);
+          dragStartRef.current = {
+            x: touch.clientX,
+            y: touch.clientY + touchOffsetY,
+            translateX: 0,
+            translateY: 0,
+            cropX: transform.state.cropX,
+            cropY: transform.state.cropY,
+            cropW: 0, cropH: 0,
+          };
+        } else {
+          setIsDraggingVideo(true);
+          dragStartRef.current = {
+            x: touch.clientX,
+            y: touch.clientY,
+            translateX: transform.state.translateX,
+            translateY: transform.state.translateY,
+            cropX: 0, cropY: 0, cropW: 0, cropH: 0,
+          };
+        }
       }
     },
-    [transform.state.scale, transform.state.translateX, transform.state.translateY],
+    [editMode, transform.state.scale, transform.state.translateX, transform.state.translateY, transform.state.cropX, transform.state.cropY],
   );
 
   // ── 全域滑鼠 + 觸控事件 (拖曳 / 調整 / 雙指縮放) ──
@@ -754,6 +786,13 @@ export function VideoEditorPage({ video, onExport, onReset, initialState }: Vide
         } else {
           transform.resizeCropBox(isResizingCrop, deltaX, deltaY);
         }
+      } else if (isDraggingCropBox) {
+        // 移動裁切框模式
+        transform.setCropBox({
+          cropX: dragStartRef.current.cropX,
+          cropY: dragStartRef.current.cropY,
+        });
+        transform.moveCropBox(deltaX, deltaY);
       } else if (isDraggingVideo) {
         transform.setTranslate(
           dragStartRef.current.translateX + deltaX,
@@ -782,12 +821,13 @@ export function VideoEditorPage({ video, onExport, onReset, initialState }: Vide
     const handleEnd = () => {
       setIsResizingCrop(null);
       setIsDraggingVideo(false);
+      setIsDraggingCropBox(false);
       pinchRef.current.active = false;
       setIsSnappingBack(true);
       transform.clampPosition();
     };
 
-    if (isResizingCrop || isDraggingVideo || pinchRef.current.active) {
+    if (isResizingCrop || isDraggingVideo || isDraggingCropBox || pinchRef.current.active) {
       window.addEventListener("mousemove", handleMouseMove);
       window.addEventListener("mouseup", handleEnd);
       window.addEventListener("touchmove", handleTouchMove, { passive: false });
@@ -801,7 +841,7 @@ export function VideoEditorPage({ video, onExport, onReset, initialState }: Vide
         window.removeEventListener("touchcancel", handleEnd);
       };
     }
-  }, [isResizingCrop, isDraggingVideo, transform]);
+  }, [isResizingCrop, isDraggingVideo, isDraggingCropBox, transform]);
 
   // ── 回彈動畫結束後重置 ──
   useEffect(() => {
@@ -1201,13 +1241,46 @@ export function VideoEditorPage({ video, onExport, onReset, initialState }: Vide
             /* ── 剪輯工作區：上方裁切預覽 + 下方時間軸 ── */
             <>
               {/* 裁切預覽區 — flex-1 佔滿剩餘空間，內部置中 */}
-              <div ref={cropWrapperRef} className="flex-1 min-h-0 flex items-center justify-center w-full">
+              <div ref={cropWrapperRef} className="flex-1 min-h-0 flex items-center justify-center w-full relative">
+                {/* 操作模式切換 */}
+                <div className="absolute top-2 left-1/2 -translate-x-1/2 z-20 flex rounded-full p-0.5 gap-0.5" style={{ background: "rgba(0,0,0,0.5)", backdropFilter: "blur(8px)", WebkitBackdropFilter: "blur(8px)" }}>
+                  <button
+                    onClick={() => setEditMode("move-video")}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-all ${
+                      editMode === "move-video"
+                        ? "bg-[#00B4FF] text-white shadow"
+                        : "text-white/60 hover:text-white"
+                    }`}
+                    title="移動影片"
+                  >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M18 11V6a2 2 0 0 0-2-2a2 2 0 0 0-2 2v1M14 10V4a2 2 0 0 0-2-2a2 2 0 0 0-2 2v6M10 10.5V6a2 2 0 0 0-2-2a2 2 0 0 0-2 2v8" />
+                      <path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8H12a8 8 0 0 1-6.3-3.1" />
+                    </svg>
+                    <span className="max-md:hidden">移動影片</span>
+                  </button>
+                  <button
+                    onClick={() => setEditMode("move-crop")}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-all ${
+                      editMode === "move-crop"
+                        ? "bg-[#00B4FF] text-white shadow"
+                        : "text-white/60 hover:text-white"
+                    }`}
+                    title="移動裁切框"
+                  >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M5 3l4 0 0 4M19 3l-4 0 0 4M5 21l4 0 0-4M19 21l-4 0 0-4" />
+                      <rect x="7" y="7" width="10" height="10" strokeDasharray="3 3" />
+                    </svg>
+                    <span className="max-md:hidden">移動裁切框</span>
+                  </button>
+                </div>
               <div
                 className="relative select-none flex-shrink-0"
                 style={{
                   width: cropContainerSize.width,
                   height: cropContainerSize.height,
-                  cursor: isDraggingVideo ? "grabbing" : "grab",
+                  cursor: (isDraggingVideo || isDraggingCropBox) ? "grabbing" : (editMode === "move-crop" ? "move" : "grab"),
                   touchAction: "none",
                 }}
                 onWheel={handleCropWheel}
