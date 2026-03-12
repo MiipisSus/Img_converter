@@ -439,6 +439,15 @@ export function VideoEditorPage({ video, onExport, onReset, initialState }: Vide
         };
         transform.forceState(restored);
         setSelectedCropRatio(savedClipState.cropRatio);
+        // 恢復比例鎖定
+        if (savedClipState.cropRatio) {
+          const [rw, rh] = savedClipState.cropRatio.split(":").map(Number);
+          setIsRatioLocked(true);
+          lockedRatioRef.current = rw / rh;
+        } else {
+          setIsRatioLocked(false);
+          lockedRatioRef.current = null;
+        }
       } else if (savedClipState && exportConfig) {
         // 舊格式 fallback (僅 scale + cropRatio)：用像素座標反推
         const restored = reconstructTransformFromCrop(
@@ -449,6 +458,11 @@ export function VideoEditorPage({ video, onExport, onReset, initialState }: Vide
         );
         transform.forceState(restored);
         setSelectedCropRatio(savedClipState.cropRatio);
+        if (savedClipState.cropRatio) {
+          const [rw, rh] = savedClipState.cropRatio.split(":").map(Number);
+          setIsRatioLocked(true);
+          lockedRatioRef.current = rw / rh;
+        }
       } else {
         // 首次進入：裁切框 = 容器全域 (cropX=0, cropY=0, cropW=cW, cropH=cH)
         transform.forceState({
@@ -456,6 +470,8 @@ export function VideoEditorPage({ video, onExport, onReset, initialState }: Vide
           cropX: 0, cropY: 0, cropW: cW, cropH: cH,
         });
         setSelectedCropRatio(null);
+        setIsRatioLocked(false);
+        lockedRatioRef.current = null;
       }
 
       // 3. 恢復後邊界校驗 — 確保影片邊緣覆蓋整個容器
@@ -733,7 +749,11 @@ export function VideoEditorPage({ video, onExport, onReset, initialState }: Vide
           cropW: dragStartRef.current.cropW,
           cropH: dragStartRef.current.cropH,
         });
-        transform.resizeCropBox(isResizingCrop, deltaX, deltaY);
+        if (isRatioLocked && lockedRatioRef.current) {
+          transform.resizeCropBoxLocked(isResizingCrop, deltaX, deltaY, lockedRatioRef.current);
+        } else {
+          transform.resizeCropBox(isResizingCrop, deltaX, deltaY);
+        }
       } else if (isDraggingVideo) {
         transform.setTranslate(
           dragStartRef.current.translateX + deltaX,
@@ -791,7 +811,11 @@ export function VideoEditorPage({ video, onExport, onReset, initialState }: Vide
     }
   }, [isSnappingBack]);
 
-  // ── 裁切比例預設 ──
+  // ── 比例鎖定 ──
+  const [isRatioLocked, setIsRatioLocked] = useState(false);
+  const lockedRatioRef = useRef<number | null>(null);
+
+  // ── 裁切比例預設（原地縮放，保持舊中心點） ──
   const handleSetCropRatio = useCallback(
     (ratioW: number, ratioH: number) => {
       setSelectedCropRatio(`${ratioW}:${ratioH}`);
@@ -800,6 +824,7 @@ export function VideoEditorPage({ video, onExport, onReset, initialState }: Vide
       const cH = cropContainerSize.height;
       const ratio = ratioW / ratioH;
 
+      // 新裁切框最大尺寸（不超出容器）
       let newW: number, newH: number;
       if (ratio >= cW / cH) {
         newW = cW;
@@ -809,14 +834,27 @@ export function VideoEditorPage({ video, onExport, onReset, initialState }: Vide
         newW = cH * ratio;
       }
 
-      const newX = (cW - newW) / 2;
-      const newY = (cH - newH) / 2;
+      // 以舊裁切框中心為基準
+      const { cropX: oldX, cropY: oldY, cropW: oldW, cropH: oldH } = transform.state;
+      const oldCenterX = oldX + oldW / 2;
+      const oldCenterY = oldY + oldH / 2;
+      let newX = oldCenterX - newW / 2;
+      let newY = oldCenterY - newH / 2;
+
+      // 智慧邊界推回：確保裁切框在容器內
+      if (newX < 0) newX = 0;
+      if (newY < 0) newY = 0;
+      if (newX + newW > cW) newX = cW - newW;
+      if (newY + newH > cH) newY = cH - newH;
 
       setIsCropAnimating(true);
       transform.setCropBox({ cropX: newX, cropY: newY, cropW: newW, cropH: newH });
-      // 保留當前縮放與位移，僅 clamp 確保影片仍覆蓋新裁切框
       transform.clampPosition();
       setTimeout(() => setIsCropAnimating(false), 450);
+
+      // 自動鎖定比例
+      setIsRatioLocked(true);
+      lockedRatioRef.current = ratio;
     },
     [cropContainerSize, transform],
   );
@@ -1208,6 +1246,39 @@ export function VideoEditorPage({ video, onExport, onReset, initialState }: Vide
                     onResizeTouchStart={handleCropResizeTouchStart}
                   />
                 </div>
+
+                {/* 比例鎖定按鈕 — 容器右上角 */}
+                <button
+                  onClick={() => {
+                    if (isRatioLocked) {
+                      setIsRatioLocked(false);
+                      lockedRatioRef.current = null;
+                    } else if (cropW > 0 && cropH > 0) {
+                      setIsRatioLocked(true);
+                      lockedRatioRef.current = cropW / cropH;
+                    }
+                  }}
+                  className={`absolute top-2 right-2 z-10 w-8 h-8 flex items-center justify-center rounded-full transition-all ${
+                    isRatioLocked
+                      ? "bg-[#00B4FF] text-white shadow-lg shadow-[#00B4FF]/30"
+                      : "bg-black/50 text-white/60 hover:text-white hover:bg-black/70"
+                  }`}
+                  title={isRatioLocked ? "解鎖比例" : "鎖定比例"}
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    {isRatioLocked ? (
+                      <>
+                        <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+                        <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+                      </>
+                    ) : (
+                      <>
+                        <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+                        <path d="M7 11V7a5 5 0 0 1 9.9-1" />
+                      </>
+                    )}
+                  </svg>
+                </button>
               </div>
               </div>
 
