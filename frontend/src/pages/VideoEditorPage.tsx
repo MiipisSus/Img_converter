@@ -421,10 +421,24 @@ export function VideoEditorPage({ video, onExport, onReset, initialState }: Vide
       const cW = dims.width;
       const cH = dims.height;
 
-      // 2. 用精確尺寸直接初始化裁切框
+      // 2. 初始化裁切框
       //    使用 forceState（不做 clamp）— 此時 optsRef 尚未更新，
       //    clamp 會用舊的 containerWidth/Height 導致 translate 偏移
-      if (savedClipState && exportConfig) {
+      if (savedClipState && savedClipState.normCropW != null) {
+        // 有歸一化狀態 → 反歸一化到新容器尺寸
+        const restored = {
+          scale: savedClipState.scale,
+          translateX: savedClipState.normTx * cW,
+          translateY: savedClipState.normTy * cH,
+          cropX: savedClipState.normCropX * cW,
+          cropY: savedClipState.normCropY * cH,
+          cropW: savedClipState.normCropW * cW,
+          cropH: savedClipState.normCropH * cH,
+        };
+        transform.forceState(restored);
+        setSelectedCropRatio(savedClipState.cropRatio);
+      } else if (savedClipState && exportConfig) {
+        // 舊格式 fallback (僅 scale + cropRatio)：用像素座標反推
         const restored = reconstructTransformFromCrop(
           { x: exportConfig.crop_x, y: exportConfig.crop_y,
             width: exportConfig.crop_w, height: exportConfig.crop_h },
@@ -442,7 +456,13 @@ export function VideoEditorPage({ video, onExport, onReset, initialState }: Vide
         setSelectedCropRatio(null);
       }
 
-      // 3. 下一幀 seek + play
+      // 3. 恢復後邊界校驗 — 確保影片邊緣覆蓋整個容器
+      //    等 optsRef 在下次 render 更新後再 clamp
+      requestAnimationFrame(() => {
+        transform.clampPosition();
+      });
+
+      // 4. 下一幀 seek + play
       requestAnimationFrame(() => {
         const vid = videoRef.current;
         if (vid) {
@@ -492,10 +512,18 @@ export function VideoEditorPage({ video, onExport, onReset, initialState }: Vide
 
     setExportConfig(config);
 
-    // 持久化剪輯狀態 — 重新進入時可恢復
+    // 持久化剪輯狀態 — 使用歸一化座標，重新進入時可跨尺寸恢復
+    const cW = cropContainerSize.width;
+    const cH = cropContainerSize.height;
     setSavedClipState({
       scale: transform.state.scale,
       cropRatio: selectedCropRatio,
+      normTx: cW > 0 ? transform.state.translateX / cW : 0,
+      normTy: cH > 0 ? transform.state.translateY / cH : 0,
+      normCropX: cW > 0 ? transform.state.cropX / cW : 0,
+      normCropY: cH > 0 ? transform.state.cropY / cH : 0,
+      normCropW: cW > 0 ? transform.state.cropW / cW : 1,
+      normCropH: cH > 0 ? transform.state.cropH / cH : 1,
     });
 
     console.log("[Clip Debug] 剪輯配置:", config);

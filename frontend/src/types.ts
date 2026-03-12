@@ -70,10 +70,20 @@ export interface ClipExportConfig {
   include_audio: boolean;
 }
 
-/** 剪輯狀態持久化 (重新進入剪輯模式時恢復) */
+/** 剪輯狀態持久化 (重新進入剪輯模式時恢復)
+ *  使用歸一化座標 (相對於容器尺寸的比例 0-1)，
+ *  確保不同螢幕尺寸間恢復時位置正確 */
 export interface SavedClipState {
   scale: number;             // 縮放等級 (1-5)
   cropRatio: string | null;  // "16:9" 等預設比例，null = 自由裁切
+  // 歸一化位移 (translateX / containerW, translateY / containerH)
+  normTx: number;
+  normTy: number;
+  // 歸一化裁切框 (相對於容器尺寸)
+  normCropX: number;
+  normCropY: number;
+  normCropW: number;
+  normCropH: number;
 }
 
 /** 輸出設定狀態 (暫態，返回裁切時會重置) */
