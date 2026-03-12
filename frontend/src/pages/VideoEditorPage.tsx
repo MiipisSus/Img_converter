@@ -98,6 +98,7 @@ export function VideoEditorPage({ video, onExport, onReset, initialState }: Vide
   // ── GIF 預覽 MP4 URL (後端代理) ──
   const [gifPreviewUrl, setGifPreviewUrl] = useState<string | null>(null);
   const [videoReady, setVideoReady] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
   const seekTimerRef = useRef<number | null>(null);
 
   // ── Refs ──
@@ -157,7 +158,8 @@ export function VideoEditorPage({ video, onExport, onReset, initialState }: Vide
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
-    getVideoInfo(video.file)
+    setUploadProgress(0);
+    getVideoInfo(video.file, (pct) => { setUploadProgress(pct); })
       .then((info) => {
         if (cancelled) return;
         setVideoInfo(info);
@@ -826,9 +828,24 @@ export function VideoEditorPage({ video, onExport, onReset, initialState }: Vide
 
   // ── Loading ──
   if (loading) {
+    const loadingLabel = uploadProgress < 100
+      ? `正在上傳影片... ${uploadProgress}%`
+      : "正在分析影片資訊...";
     return (
       <div className="min-h-[100dvh] bg-sidebar flex items-center justify-center">
-        <div className="text-white/50 text-sm">正在載入影片資訊...</div>
+        <div className="flex flex-col items-center gap-4 w-64">
+          <div className="text-white/50 text-sm">{loadingLabel}</div>
+          <div className="w-full h-2 bg-white/10 rounded-full overflow-hidden">
+            <div
+              className="h-full rounded-full transition-all duration-300"
+              style={{
+                width: `${uploadProgress < 100 ? uploadProgress : 100}%`,
+                background: "#00B4FF",
+                boxShadow: "0 0 12px rgba(0,180,255,0.6)",
+              }}
+            />
+          </div>
+        </div>
       </div>
     );
   }
