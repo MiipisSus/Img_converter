@@ -22,22 +22,46 @@ export interface BitrateEstimateResult {
   warning?: string;
 }
 
-/** 取得影片基本資訊 */
-export async function getVideoInfo(file: File): Promise<VideoInfoResult> {
+/** 取得影片基本資訊（支援上傳進度回報） */
+export async function getVideoInfo(
+  file: File,
+  onUploadProgress?: (pct: number) => void,
+): Promise<VideoInfoResult> {
   const formData = new FormData();
   formData.append("video", file);
 
-  const res = await fetch(`${API_BASE}/videos/info`, {
-    method: "POST",
-    body: formData,
+  return new Promise<VideoInfoResult>((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", `${API_BASE}/videos/info`);
+
+    if (onUploadProgress) {
+      xhr.upload.addEventListener("progress", (e) => {
+        if (e.lengthComputable && e.total > 0) {
+          onUploadProgress(Math.round((e.loaded / e.total) * 100));
+        }
+      });
+    }
+
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        try {
+          resolve(JSON.parse(xhr.responseText));
+        } catch {
+          reject(new Error("解析回應失敗"));
+        }
+      } else {
+        try {
+          const err = JSON.parse(xhr.responseText);
+          reject(new Error(err.detail || `HTTP ${xhr.status}`));
+        } catch {
+          reject(new Error(`HTTP ${xhr.status}`));
+        }
+      }
+    };
+
+    xhr.onerror = () => reject(new Error("網路錯誤"));
+    xhr.send(formData);
   });
-
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ detail: "取得影片資訊失敗" }));
-    throw new Error(err.detail || `HTTP ${res.status}`);
-  }
-
-  return res.json();
 }
 
 /** 預估壓縮後的位元率與檔案大小 */
