@@ -33,6 +33,8 @@ interface ImageEditorProps {
   onRatioLockChange?: Dispatch<SetStateAction<boolean>>;
   /** 已選比例文字（外部控制，解鎖時清除） */
   onSelectedCropRatioChange?: Dispatch<SetStateAction<string | null>>;
+  /** 操作模式：移動圖片 or 移動裁切框 */
+  editMode?: "move-image" | "move-crop";
   /** 預覽容器實際寬度 (用於 viewport-aware M 計算) */
   viewportWidth?: number;
   /** 預覽容器實際高度 */
@@ -56,6 +58,7 @@ export function ImageEditor({
   isRatioLocked = false,
   onRatioLockChange,
   onSelectedCropRatioChange,
+  editMode = "move-image",
 }: ImageEditorProps) {
   const imageRef = useRef<HTMLImageElement>(null);
   const [imageLoaded, setImageLoaded] = useState(false);
@@ -63,6 +66,7 @@ export function ImageEditor({
   // 拖動狀態
   const [isResizing, setIsResizing] = useState<ResizeHandle | null>(null);
   const [isDraggingImage, setIsDraggingImage] = useState(false);
+  const [isDraggingCropBox, setIsDraggingCropBox] = useState(false);
   const [isSnappingBack, setIsSnappingBack] = useState(false);
   const [isCropAnimating, setIsCropAnimating] = useState(false);
   const dragStartRef = useRef({
@@ -97,6 +101,7 @@ export function ImageEditor({
     toggleFlipY,
     resizeCropBox,
     resizeCropBoxLocked,
+    moveCropBox,
     setCropBox,
   } = editor;
 
@@ -176,22 +181,26 @@ export function ImageEditor({
     [state.cropX, state.cropY, state.cropW, state.cropH],
   );
 
-  // --- 拖動圖片 (框定型：非控制點區域皆為圖片拖動) ---
+  // --- 拖動圖片 or 裁切框 ---
   const handleContainerMouseDown = useCallback(
     (e: React.MouseEvent) => {
-      setIsDraggingImage(true);
-      dragStartRef.current = {
-        x: e.clientX,
-        y: e.clientY,
-        cropX: 0,
-        cropY: 0,
-        cropW: 0,
-        cropH: 0,
-        imageX: state.imageX,
-        imageY: state.imageY,
-      };
+      if (editMode === "move-crop") {
+        setIsDraggingCropBox(true);
+        dragStartRef.current = {
+          x: e.clientX, y: e.clientY,
+          cropX: state.cropX, cropY: state.cropY,
+          cropW: 0, cropH: 0, imageX: 0, imageY: 0,
+        };
+      } else {
+        setIsDraggingImage(true);
+        dragStartRef.current = {
+          x: e.clientX, y: e.clientY,
+          cropX: 0, cropY: 0, cropW: 0, cropH: 0,
+          imageX: state.imageX, imageY: state.imageY,
+        };
+      }
     },
-    [state.scale, state.rotate, state.imageX, state.imageY],
+    [editMode, state.scale, state.rotate, state.imageX, state.imageY, state.cropX, state.cropY],
   );
 
   // --- 觸控：調整裁切框大小 ---
@@ -214,11 +223,10 @@ export function ImageEditor({
     [state.cropX, state.cropY, state.cropW, state.cropH],
   );
 
-  // --- 觸控：拖動圖片 / 雙指縮放 ---
+  // --- 觸控：拖動圖片/裁切框 / 雙指縮放 ---
   const handleContainerTouchStart = useCallback(
     (e: React.TouchEvent) => {
       if (e.touches.length === 2) {
-        // 雙指縮放
         const dx = e.touches[0].clientX - e.touches[1].clientX;
         const dy = e.touches[0].clientY - e.touches[1].clientY;
         pinchRef.current = {
@@ -227,22 +235,26 @@ export function ImageEditor({
           startScale: state.scale,
         };
       } else if (e.touches.length === 1) {
-        // 單指拖動
         const touch = e.touches[0];
-        setIsDraggingImage(true);
-        dragStartRef.current = {
-          x: touch.clientX,
-          y: touch.clientY,
-          cropX: 0,
-          cropY: 0,
-          cropW: 0,
-          cropH: 0,
-          imageX: state.imageX,
-          imageY: state.imageY,
-        };
+        const touchOffsetY = editMode === "move-crop" ? -20 : 0;
+        if (editMode === "move-crop") {
+          setIsDraggingCropBox(true);
+          dragStartRef.current = {
+            x: touch.clientX, y: touch.clientY + touchOffsetY,
+            cropX: state.cropX, cropY: state.cropY,
+            cropW: 0, cropH: 0, imageX: 0, imageY: 0,
+          };
+        } else {
+          setIsDraggingImage(true);
+          dragStartRef.current = {
+            x: touch.clientX, y: touch.clientY,
+            cropX: 0, cropY: 0, cropW: 0, cropH: 0,
+            imageX: state.imageX, imageY: state.imageY,
+          };
+        }
       }
     },
-    [state.scale, state.imageX, state.imageY],
+    [editMode, state.scale, state.imageX, state.imageY, state.cropX, state.cropY],
   );
 
   // --- 全域滑鼠 + 觸控事件 ---
@@ -263,6 +275,12 @@ export function ImageEditor({
         } else {
           resizeCropBox(isResizing, deltaX, deltaY);
         }
+      } else if (isDraggingCropBox) {
+        setCropBox({
+          cropX: dragStartRef.current.cropX,
+          cropY: dragStartRef.current.cropY,
+        });
+        moveCropBox(deltaX, deltaY);
       } else if (isDraggingImage) {
         setImagePosition(
           dragStartRef.current.imageX + deltaX,
@@ -276,7 +294,6 @@ export function ImageEditor({
     const handleTouchMove = (e: TouchEvent) => {
       if (e.cancelable) e.preventDefault();
       if (e.touches.length === 2 && pinchRef.current.active) {
-        // 雙指縮放
         const dx = e.touches[0].clientX - e.touches[1].clientX;
         const dy = e.touches[0].clientY - e.touches[1].clientY;
         const dist = Math.hypot(dx, dy);
@@ -292,12 +309,13 @@ export function ImageEditor({
     const handleEnd = () => {
       setIsResizing(null);
       setIsDraggingImage(false);
+      setIsDraggingCropBox(false);
       pinchRef.current.active = false;
       setIsSnappingBack(true);
       clampImage();
     };
 
-    if (isResizing || isDraggingImage || pinchRef.current.active) {
+    if (isResizing || isDraggingImage || isDraggingCropBox || pinchRef.current.active) {
       window.addEventListener("mousemove", handleMouseMove);
       window.addEventListener("mouseup", handleEnd);
       window.addEventListener("touchmove", handleTouchMove, { passive: false });
@@ -314,8 +332,10 @@ export function ImageEditor({
   }, [
     isResizing,
     isDraggingImage,
+    isDraggingCropBox,
     setCropBox,
     resizeCropBox,
+    moveCropBox,
     setImagePosition,
     clampImage,
     setScale,
@@ -359,7 +379,7 @@ export function ImageEditor({
         style={{
           width: containerWidth,
           height: containerHeight,
-          cursor: isDraggingImage ? "grabbing" : "grab",
+          cursor: (isDraggingImage || isDraggingCropBox) ? "grabbing" : (editMode === "move-crop" ? "move" : "grab"),
           touchAction: "none",
         }}
         onWheel={handleWheel}
