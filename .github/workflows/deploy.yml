@@ -48,6 +48,7 @@ jobs:
             fi
 
             echo "--- Restarting Containers ---"
+            export APP_VERSION="$TAG"
             docker compose down --remove-orphans
             docker compose up --build -d
 
