@@ -1,4 +1,4 @@
-import { useRef, useEffect, useCallback, useState } from "react";
+import { useRef, useEffect, useCallback, useState, type Dispatch, type SetStateAction } from "react";
 import {
   useImageEditor,
   type EditorState,
@@ -26,7 +26,13 @@ interface ImageEditorProps {
     setScale: (s: number) => void;
     setRotate: (r: number) => void;
     setCropBox: (crop: { cropX: number; cropY: number; cropW: number; cropH: number }, animated?: boolean) => void;
+    setRatioLock: (locked: boolean, ratio: number | null) => void;
   } | null>;
+  /** 比例鎖定狀態（外部控制） */
+  isRatioLocked?: boolean;
+  onRatioLockChange?: Dispatch<SetStateAction<boolean>>;
+  /** 已選比例文字（外部控制，解鎖時清除） */
+  onSelectedCropRatioChange?: Dispatch<SetStateAction<string | null>>;
   /** 預覽容器實際寬度 (用於 viewport-aware M 計算) */
   viewportWidth?: number;
   /** 預覽容器實際高度 */
@@ -47,6 +53,9 @@ export function ImageEditor({
   viewportWidth,
   viewportHeight,
   referenceM,
+  isRatioLocked = false,
+  onRatioLockChange,
+  onSelectedCropRatioChange,
 }: ImageEditorProps) {
   const imageRef = useRef<HTMLImageElement>(null);
   const [imageLoaded, setImageLoaded] = useState(false);
@@ -68,6 +77,8 @@ export function ImageEditor({
   });
   // 雙指縮放狀態
   const pinchRef = useRef({ active: false, startDist: 0, startScale: 1 });
+  // 比例鎖定
+  const lockedRatioRef = useRef<number | null>(null);
 
   // V8: 傳入 viewport 尺寸供 viewport-aware M 計算
   const editor = useImageEditor({ initialState, viewportWidth, viewportHeight, referenceM });
@@ -85,6 +96,7 @@ export function ImageEditor({
     toggleFlipX,
     toggleFlipY,
     resizeCropBox,
+    resizeCropBoxLocked,
     setCropBox,
   } = editor;
 
@@ -118,6 +130,10 @@ export function ImageEditor({
           }
           setCropBox(crop);
         },
+        setRatioLock: (locked, ratio) => {
+          lockedRatioRef.current = ratio;
+          onRatioLockChange?.(locked);
+        },
       };
     }
     return () => {
@@ -125,7 +141,7 @@ export function ImageEditor({
         onEditorControlRef.current = null;
       }
     };
-  }, [onEditorControlRef, setScale, setRotate, setCropBox]);
+  }, [onEditorControlRef, setScale, setRotate, setCropBox, onRatioLockChange]);
 
   // 圖片載入 - 初始化編輯器
   const handleImageLoad = useCallback(() => {
@@ -242,7 +258,11 @@ export function ImageEditor({
           cropW: dragStartRef.current.cropW,
           cropH: dragStartRef.current.cropH,
         });
-        resizeCropBox(isResizing, deltaX, deltaY);
+        if (isRatioLocked && lockedRatioRef.current) {
+          resizeCropBoxLocked(isResizing, deltaX, deltaY, lockedRatioRef.current);
+        } else {
+          resizeCropBox(isResizing, deltaX, deltaY);
+        }
       } else if (isDraggingImage) {
         setImagePosition(
           dragStartRef.current.imageX + deltaX,
@@ -510,6 +530,47 @@ export function ImageEditor({
               />
             ))}
           </div>
+        )}
+
+        {/* 比例鎖定按鈕 — 跟隨裁切框右上角 */}
+        {imageInfo && imageLoaded && (
+          <button
+            onClick={() => {
+              if (isRatioLocked) {
+                onRatioLockChange?.(false);
+                lockedRatioRef.current = null;
+                onSelectedCropRatioChange?.(null);
+              } else if (cropW > 0 && cropH > 0) {
+                onRatioLockChange?.(true);
+                lockedRatioRef.current = cropW / cropH;
+              }
+            }}
+            className={`absolute z-10 w-7 h-7 flex items-center justify-center rounded-full transition-colors ${
+              isRatioLocked
+                ? "bg-highlight text-black shadow-lg shadow-highlight/30"
+                : "bg-black/50 text-white/60 hover:text-white hover:bg-black/70"
+            }`}
+            style={{
+              left: cropX + cropW - 40,
+              top: cropY + 14,
+              transition: cropTransition !== "none" ? "left 0.4s cubic-bezier(0.4,0,0.2,1), top 0.4s cubic-bezier(0.4,0,0.2,1)" : "none",
+            }}
+            title={isRatioLocked ? "解鎖比例" : "鎖定比例"}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              {isRatioLocked ? (
+                <>
+                  <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+                  <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+                </>
+              ) : (
+                <>
+                  <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+                  <path d="M7 11V7a5 5 0 0 1 9.9-1" />
+                </>
+              )}
+            </svg>
+          </button>
         )}
       </div>
 

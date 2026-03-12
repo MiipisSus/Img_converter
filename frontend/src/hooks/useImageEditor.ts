@@ -562,6 +562,54 @@ export function useImageEditor(options: UseImageEditorOptions | null) {
     [minCropSize]
   )
 
+  // 鎖定比例調整裁切框大小
+  const resizeCropBoxLocked = useCallback(
+    (
+      handle: 'nw' | 'ne' | 'sw' | 'se' | 'n' | 's' | 'e' | 'w',
+      deltaX: number,
+      deltaY: number,
+      lockedRatio: number,
+    ) => {
+      const info = imageInfoRef.current
+      if (!info) return
+
+      const { containerWidth, containerHeight } = info
+
+      setState((prev) => {
+        let { cropX, cropY, cropW, cropH } = prev
+        const originalRight = cropX + cropW
+        const originalBottom = cropY + cropH
+
+        let d: number
+        switch (handle) {
+          case 'se': d = Math.abs(deltaX) > Math.abs(deltaY) ? deltaX : deltaY * lockedRatio; cropW += d; cropH = cropW / lockedRatio; break
+          case 'sw': d = Math.abs(deltaX) > Math.abs(deltaY) ? -deltaX : deltaY * lockedRatio; cropW += d; cropX = originalRight - cropW; cropH = cropW / lockedRatio; break
+          case 'ne': d = Math.abs(deltaX) > Math.abs(deltaY) ? deltaX : -deltaY * lockedRatio; cropW += d; cropH = cropW / lockedRatio; cropY = originalBottom - cropH; break
+          case 'nw': d = Math.abs(deltaX) > Math.abs(deltaY) ? -deltaX : -deltaY * lockedRatio; cropW += d; cropX = originalRight - cropW; cropH = cropW / lockedRatio; cropY = originalBottom - cropH; break
+          case 'e': cropW += deltaX; cropH = cropW / lockedRatio; break
+          case 'w': cropW -= deltaX; cropX = originalRight - cropW; cropH = cropW / lockedRatio; break
+          case 'n': cropH -= deltaY; cropY = originalBottom - cropH; cropW = cropH * lockedRatio; break
+          case 's': cropH += deltaY; cropW = cropH * lockedRatio; break
+        }
+
+        if (cropX < 0) { cropX = 0; cropW = originalRight }
+        if (cropY < 0) { cropY = 0; cropH = originalBottom }
+        if (cropX + cropW > containerWidth) { cropW = containerWidth - cropX }
+        if (cropY + cropH > containerHeight) { cropH = containerHeight - cropY }
+
+        if (cropW / cropH > lockedRatio) { cropW = cropH * lockedRatio } else { cropH = cropW / lockedRatio }
+        if (handle.includes('w')) cropX = originalRight - cropW
+        if (handle.includes('n')) cropY = originalBottom - cropH
+
+        if (cropW < minCropSize) { cropW = minCropSize; cropH = cropW / lockedRatio }
+        if (cropH < minCropSize) { cropH = minCropSize; cropW = cropH * lockedRatio }
+
+        return { ...prev, cropX, cropY, cropW, cropH }
+      })
+    },
+    [minCropSize]
+  )
+
   // 直接設定裁切框
   const setCropBox = useCallback(
     (crop: { cropX?: number; cropY?: number; cropW?: number; cropH?: number }) => {
@@ -616,6 +664,7 @@ export function useImageEditor(options: UseImageEditorOptions | null) {
     toggleFlipY,
     moveCropBox,
     resizeCropBox,
+    resizeCropBoxLocked,
     setCropBox,
   }
 }

@@ -95,8 +95,11 @@ export function EditorPage({
       },
       animated?: boolean,
     ) => void;
+    setRatioLock: (locked: boolean, ratio: number | null) => void;
   } | null>(null);
   const [cropViewState, setCropViewState] = useState({ scale: 1, rotate: 0 });
+  const [isRatioLocked, setIsRatioLocked] = useState(false);
+  const [selectedCropRatio, setSelectedCropRatio] = useState<string | null>(null);
 
   // 累積視覺旋轉角度 (不取模，用於 CSS 平滑動畫避免 270°→0° 反向插值)
   const visualBaseRotateRef = useRef(0);
@@ -241,6 +244,8 @@ export function EditorPage({
       scale: editorState.scale,
       rotate: editorState.rotate,
     });
+    setIsRatioLocked(false);
+    setSelectedCropRatio(null);
     setMode("crop");
   }, [pipelineState, setPipelineState]);
 
@@ -385,6 +390,11 @@ export function EditorPage({
         { cropX: newX, cropY: newY, cropW: newW, cropH: newH },
         true,
       );
+
+      // 自動鎖定比例
+      setSelectedCropRatio(`${ratioW}:${ratioH}`);
+      setIsRatioLocked(true);
+      editorControlRef.current.setRatioLock(true, ratio);
     },
     [],
   );
@@ -801,6 +811,7 @@ export function EditorPage({
                 editorControlRef.current?.setRotate(r)
               }
               onSetCropRatio={handleSetCropRatio}
+              selectedCropRatio={selectedCropRatio}
             />
           )}
         </div>
@@ -856,6 +867,9 @@ export function EditorPage({
               viewportWidth={viewportSize.width}
               viewportHeight={viewportSize.height}
               referenceM={pipelineState.imageInfo.displayMultiplier}
+              isRatioLocked={isRatioLocked}
+              onRatioLockChange={setIsRatioLocked}
+              onSelectedCropRatioChange={setSelectedCropRatio}
             />
           )}
         </div>
@@ -1067,6 +1081,7 @@ function CropControlPanel({
   onScaleChange,
   onRotateChange,
   onSetCropRatio,
+  selectedCropRatio,
 }: {
   onConfirm: () => void;
   onCancel: () => void;
@@ -1076,6 +1091,7 @@ function CropControlPanel({
   onScaleChange: (s: number) => void;
   onRotateChange: (r: number) => void;
   onSetCropRatio: (ratioW: number, ratioH: number) => void;
+  selectedCropRatio: string | null;
 }) {
   const ratios: { label: string; w: number; h: number }[] = [
     { label: "1:1", w: 1, h: 1 },
@@ -1110,8 +1126,11 @@ function CropControlPanel({
               <button
                 key={label}
                 onClick={() => onSetCropRatio(w, h)}
-                className="crop-ratio-btn flex flex-col items-center justify-center gap-1.5 rounded-lg border border-white/10 bg-white/5 transition-all
-                  hover:bg-highlight/15 hover:border-highlight/60 active:scale-95"
+                className={`crop-ratio-btn flex flex-col items-center justify-center gap-1.5 rounded-lg border transition-all active:scale-95
+                  ${selectedCropRatio === label
+                    ? "border-highlight bg-highlight/20"
+                    : "border-white/10 bg-white/5 hover:bg-highlight/15 hover:border-highlight/60"
+                  }`}
                 style={{ aspectRatio: "1 / 1" }}
               >
                 <div
