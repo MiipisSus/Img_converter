@@ -879,7 +879,7 @@ export function EditorPage({
           {/* 操作模式切換 (crop mode only) */}
           {mode === "crop" && (
             <div
-              className="absolute top-2 left-1/2 -translate-x-1/2 z-20 flex rounded-full p-0.5 gap-0.5 cursor-pointer select-none"
+              className="absolute top-2 left-1/2 -translate-x-1/2 max-md:left-2 max-md:translate-x-0 z-20 flex rounded-full p-0.5 gap-0.5 cursor-pointer select-none"
               style={{ background: "rgba(0,0,0,0.5)", backdropFilter: "blur(8px)", WebkitBackdropFilter: "blur(8px)" }}
               onClick={() => setImgEditMode(imgEditMode === "move-image" ? "move-crop" : "move-image")}
               title={imgEditMode === "move-image" ? "切換至移動裁切框" : "切換至移動圖片"}
