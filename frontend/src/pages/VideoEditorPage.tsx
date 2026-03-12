@@ -1244,7 +1244,7 @@ export function VideoEditorPage({ video, onExport, onReset, initialState }: Vide
               <div ref={cropWrapperRef} className="flex-1 min-h-0 flex items-center justify-center w-full relative">
                 {/* 操作模式切換 */}
                 <div
-                  className="absolute top-2 left-1/2 -translate-x-1/2 z-20 flex rounded-full p-0.5 gap-0.5 cursor-pointer"
+                  className="absolute top-2 left-1/2 -translate-x-1/2 z-20 flex rounded-full p-0.5 gap-0.5 cursor-pointer select-none"
                   style={{ background: "rgba(0,0,0,0.5)", backdropFilter: "blur(8px)", WebkitBackdropFilter: "blur(8px)" }}
                   onClick={() => setEditMode(editMode === "move-video" ? "move-crop" : "move-video")}
                   title={editMode === "move-video" ? "切換至移動裁切框" : "切換至移動影片"}
