@@ -372,8 +372,9 @@ export function VideoEditorPage({ video, onExport, onReset, initialState }: Vide
     const wrapper = cropWrapperRef.current;
     if (wrapper) {
       const rect = wrapper.getBoundingClientRect();
-      availW = rect.width;
-      availH = rect.height;
+      const cs = getComputedStyle(wrapper);
+      availW = rect.width - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+      availH = rect.height - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom);
     } else {
       const el = clipAreaRef.current;
       if (!el) return null;
@@ -1241,7 +1242,7 @@ export function VideoEditorPage({ video, onExport, onReset, initialState }: Vide
             /* ── 剪輯工作區：上方裁切預覽 + 下方時間軸 ── */
             <>
               {/* 裁切預覽區 — flex-1 佔滿剩餘空間，內部置中 */}
-              <div ref={cropWrapperRef} className="flex-1 min-h-0 flex items-center justify-center w-full relative">
+              <div ref={cropWrapperRef} className="flex-1 min-h-0 flex items-center justify-center w-full relative py-14 max-md:py-6">
                 {/* 操作模式切換 */}
                 <div
                   className="absolute top-2 left-1/2 -translate-x-1/2 z-20 flex rounded-full p-0.5 gap-0.5 cursor-pointer select-none"
