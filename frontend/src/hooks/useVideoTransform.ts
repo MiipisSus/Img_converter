@@ -28,7 +28,8 @@ const DEFAULT_STATE: VideoTransformState = {
 
 /**
  * 無旋轉版位移約束
- * 確保影片縮放後覆蓋裁切框四邊
+ * 確保影片縮放後覆蓋整個容器四邊（而非僅裁切框）
+ * 防止拖動時容器邊緣露出黑色背景
  */
 function clampTranslate(
   state: VideoTransformState,
@@ -38,22 +39,26 @@ function clampTranslate(
   containerW: number,
   containerH: number,
 ): { translateX: number; translateY: number } | null {
-  const { scale, translateX: tx, translateY: ty, cropX, cropY, cropW, cropH } = state
+  const { scale, translateX: tx, translateY: ty } = state
 
   // 影片縮放後的顯示尺寸
   const vw = videoW * M * scale
   const vh = videoH * M * scale
 
   // 影片左上角 (transform-origin: center → 影片中心在容器中心 + 偏移)
-  // videoCenter = (containerW/2 + tx, containerH/2 + ty)
-  // videoLeft = containerW/2 + tx - vw/2
-  // 約束: videoLeft ≤ cropX  →  tx ≤ cropX - (containerW/2 - vw/2) = cropX - containerW/2 + vw/2
-  // 約束: videoRight ≥ cropRight  →  containerW/2 + tx + vw/2 ≥ cropX + cropW  →  tx ≥ cropX + cropW - containerW/2 - vw/2
+  // videoLeft  = (containerW - vw) / 2 + tx
+  // videoRight = (containerW + vw) / 2 + tx
+  //
+  // 約束: 影片必須覆蓋整個容器
+  //   videoLeft  <= 0           →  tx <= (vw - containerW) / 2
+  //   videoRight >= containerW  →  tx >= (containerW - vw) / 2
+  //   videoTop   <= 0           →  ty <= (vh - containerH) / 2
+  //   videoBottom >= containerH →  ty >= (containerH - vh) / 2
 
-  const maxTx = cropX - containerW / 2 + vw / 2
-  const minTx = cropX + cropW - containerW / 2 - vw / 2
-  const maxTy = cropY - containerH / 2 + vh / 2
-  const minTy = cropY + cropH - containerH / 2 - vh / 2
+  const maxTx = (vw - containerW) / 2
+  const minTx = (containerW - vw) / 2
+  const maxTy = (vh - containerH) / 2
+  const minTy = (containerH - vh) / 2
 
   const clampedTx = Math.max(minTx, Math.min(maxTx, tx))
   const clampedTy = Math.max(minTy, Math.min(maxTy, ty))
