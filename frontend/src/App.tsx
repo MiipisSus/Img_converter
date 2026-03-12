@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useMemo, useEffect } from "react";
-import type { AppStep, PipelineState, ImageItem, VideoItem, ClipExportConfig } from "./types";
+import type { AppStep, PipelineState, ImageItem, VideoItem, ClipExportConfig, SavedClipState } from "./types";
 import { UploadPage } from "./pages/UploadPage";
 import { EditorPage } from "./pages/EditorPage";
 import { ExportPage } from "./pages/ExportPage";
@@ -18,7 +18,7 @@ export interface VideoExportState {
   rotate: number;
   flipH: boolean;
   flipV: boolean;
-  savedClipState: { scale: number; cropRatio: string | null } | null;
+  savedClipState: SavedClipState | null;
 }
 
 function App() {
