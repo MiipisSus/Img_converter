@@ -9,8 +9,7 @@ COPY package.json package-lock.json ./
 RUN npm ci
 
 COPY . .
-ENV VITE_APP_VERSION=$APP_VERSION
-RUN npm run build
+RUN VITE_APP_VERSION=$APP_VERSION npm run build
 
 # ── Stage 2: Serve ──
 FROM nginx:alpine

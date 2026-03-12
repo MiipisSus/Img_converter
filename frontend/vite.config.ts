@@ -3,13 +3,14 @@ import react from '@vitejs/plugin-react'
 import { execSync } from 'child_process'
 
 function getAppVersion(): string {
-  // Docker build 時透過 VITE_APP_VERSION env 傳入
+  // 1. Docker / CI：透過 VITE_APP_VERSION env 傳入（最可靠）
   if (process.env.VITE_APP_VERSION) return process.env.VITE_APP_VERSION
-  // 本地開發：從 git tag 取得
+  // 2. 本地開發：從 git tag 取得
   try {
     return execSync('git describe --tags --abbrev=0 2>/dev/null').toString().trim()
   } catch {
-    return 'dev'
+    // 3. Fallback
+    return 'dev-build'
   }
 }
 
