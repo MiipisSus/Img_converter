@@ -1,12 +1,15 @@
 # ── Stage 1: Build ──
 FROM node:20-alpine AS build
 
+ARG APP_VERSION=dev
+
 WORKDIR /app
 
 COPY package.json package-lock.json ./
 RUN npm ci
 
 COPY . .
+ENV VITE_APP_VERSION=$APP_VERSION
 RUN npm run build
 
 # ── Stage 2: Serve ──
