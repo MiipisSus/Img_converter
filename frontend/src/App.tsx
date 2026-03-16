@@ -103,19 +103,17 @@ function App() {
   const handleRemoveImage = useCallback((id: string) => {
     setImages((prev) => {
       const next = prev.filter((img) => img.id !== id);
-      // 若移除的是當前選中的圖片，自動選下一張或清空
-      if (id === activeImageId) {
-        if (next.length > 0) {
-          const idx = prev.findIndex((img) => img.id === id);
-          const newIdx = Math.min(idx, next.length - 1);
-          setActiveImageId(next[newIdx].id);
-        } else {
-          setActiveImageId("");
-        }
+      const currentId = activeImageIdRef.current;
+      if (next.length === 0) {
+        setActiveImageId("");
+      } else if (id === currentId) {
+        const idx = prev.findIndex((img) => img.id === id);
+        const newIdx = Math.min(idx, next.length - 1);
+        setActiveImageId(next[newIdx].id);
       }
       return next;
     });
-  }, [activeImageId]);
+  }, []);
 
   const handleExport = useCallback(() => {
     setCurrentStep("export");
@@ -191,7 +189,22 @@ function App() {
 
   // 圖片編輯模式
   if (currentStep === "edit") {
-    if (!activeImage) return null;
+    if (!activeImage) {
+      return (
+        <EditorPage
+          images={images}
+          activeImageId={activeImageId}
+          onSelectImage={handleSelectImage}
+          onRemoveImage={handleRemoveImage}
+          onUpdateImage={handleUpdateImage}
+          onAppendImages={handleAppendImages}
+          imageRef={imageRef}
+          setPipelineState={setPipelineState}
+          onExport={handleExport}
+          onReset={handleReset}
+        />
+      );
+    }
     return (
       <EditorPage
         images={images}

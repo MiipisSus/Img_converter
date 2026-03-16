@@ -504,6 +504,24 @@ export function ImageEditor({
               />
             ))}
 
+            {/* 裁切尺寸標籤 — 僅桌面端顯示 */}
+            {imageInfo && (
+              <div
+                className="hidden md:block absolute left-1/2 -translate-x-1/2 pointer-events-none whitespace-nowrap"
+                style={{
+                  bottom: -24,
+                  fontSize: 12,
+                  color: "#D4FF3F",
+                  textShadow: "0 1px 3px rgba(0,0,0,0.8)",
+                }}
+              >
+                {Math.round(cropW / (imageInfo.displayMultiplier * scale))}
+                {" × "}
+                {Math.round(cropH / (imageInfo.displayMultiplier * scale))}
+                {" px"}
+              </div>
+            )}
+
             {/* 四邊 Handles (含擴展觸控區) */}
             {(["n", "s", "e", "w"] as const).map((handle) => (
               <div

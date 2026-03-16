@@ -55,7 +55,7 @@ export function EditorPage({
     async (e: React.ChangeEvent<HTMLInputElement>) => {
       const files = e.target.files;
       if (!files || files.length === 0) return;
-      const imageFiles = Array.from(files).filter((f) => f.type.startsWith("image/"));
+      const imageFiles = Array.from(files).filter((f) => f.type.startsWith("image/") && f.type !== "image/gif");
       if (imageFiles.length === 0) return;
       const items = await Promise.all(imageFiles.map(loadImageFile));
       onAppendImages(items);
@@ -144,10 +144,9 @@ export function EditorPage({
     return () => ro.disconnect();
   }, []);
 
-  // 提前 return 必須在所有 hooks 之後
-  if (!currentImageData) return null;
-  const { pipelineState } = currentImageData;
-  const imageSrc = currentImageData.src;
+  const hasImage = !!currentImageData;
+  const pipelineState = currentImageData?.pipelineState ?? null;
+  const imageSrc = currentImageData?.src ?? "";
 
   // 接收編輯器狀態更新
   const handleStateChange = useCallback(
@@ -208,6 +207,7 @@ export function EditorPage({
 
   // 進入裁切模式
   const handleEnterCropMode = useCallback(() => {
+    if (!pipelineState) return;
     const { editorState, imageInfo, resize } = pipelineState;
     const targetAspectRatio = resize.targetWidth / resize.targetHeight;
     const currentAspectRatio = editorState.cropW / editorState.cropH;
@@ -253,7 +253,7 @@ export function EditorPage({
 
   // 確定裁切
   const handleConfirmCrop = useCallback(async () => {
-    if (!imageRef.current || !currentEditorStateRef.current || isExporting)
+    if (!imageRef.current || !currentEditorStateRef.current || isExporting || !pipelineState)
       return;
 
     setIsExporting(true);
@@ -318,7 +318,7 @@ export function EditorPage({
     } finally {
       setIsExporting(false);
     }
-  }, [isExporting, pipelineState.resize, imageRef, setPipelineState]);
+  }, [isExporting, pipelineState?.resize, imageRef, setPipelineState]);
 
   // 返回 (從裁切模式)
   const handleCancelCrop = useCallback(() => {
@@ -413,7 +413,7 @@ export function EditorPage({
       },
       is90Rotation = false,
     ) => {
-      if (!imageRef.current || isExporting) return;
+      if (!imageRef.current || isExporting || !pipelineState) return;
 
       setIsExporting(true);
 
@@ -731,7 +731,7 @@ export function EditorPage({
 
   // 進入輸出模式
   const handleEnterOutputMode = useCallback(async () => {
-    if (!imageRef.current || isExporting) return;
+    if (!imageRef.current || isExporting || !pipelineState) return;
 
     setIsExporting(true);
     // 讓瀏覽器先完成 UI 更新 (顯示 loading)，再執行耗時的 canvas 運算
@@ -762,8 +762,94 @@ export function EditorPage({
     }
   }, [isExporting, pipelineState, imageRef, setPipelineState, onExport]);
 
-  const currentFlipX = pipelineState.editorState.flipX;
-  const currentFlipY = pipelineState.editorState.flipY;
+  const currentFlipX = pipelineState?.editorState.flipX ?? false;
+  const currentFlipY = pipelineState?.editorState.flipY ?? false;
+
+  if (!hasImage || !pipelineState || !currentImageData) {
+    return (
+      <div className="h-[100dvh] flex overflow-hidden bg-sidebar layout-editor">
+        <header className="hidden max-md:flex items-center justify-center bg-sidebar px-4 py-2">
+          <button onClick={() => setShowResetModal(true)} className="cursor-pointer">
+            <img src={logoImg} alt="picgopic!" className="h-10" />
+          </button>
+        </header>
+        <aside className="w-[30%] min-w-[240px] max-w-[320px] flex flex-col h-[100dvh] sticky top-0 bg-sidebar max-md:h-auto">
+          <div className="p-4 pb-2 mx-auto mb-6 max-md:hidden">
+            <button onClick={() => setShowResetModal(true)} className="cursor-pointer">
+              <img src={logoImg} alt="picgopic!" className="h-16" />
+            </button>
+          </div>
+          <div className="flex-1 p-4 pt-2 flex flex-col gap-3 opacity-30 pointer-events-none">
+            <CropToolPanel
+              onEnterCropMode={() => {}}
+              onRotateLeft={() => {}}
+              onRotateRight={() => {}}
+              onFlipX={() => {}}
+              onFlipY={() => {}}
+              flipX={false}
+              flipY={false}
+              isExporting={true}
+              pipelineState={null}
+            />
+          </div>
+          <div className="p-4 pt-0 flex flex-col gap-2" style={{ paddingBottom: "max(16px, env(safe-area-inset-bottom))" }}>
+            <button
+              disabled
+              className="w-full px-4 py-3 bg-highlight text-black font-bold rounded-[10px] transition-all btn-highlight disabled:opacity-30 cursor-not-allowed"
+            >
+              導出圖片
+            </button>
+            <button
+              onClick={() => setShowResetModal(true)}
+              className="w-full px-4 py-2 text-white/70 hover:text-white text-md transition-colors"
+            >
+              返回
+            </button>
+          </div>
+        </aside>
+        <main className="flex-1 flex flex-col h-[100dvh]">
+          <div className="flex-1 bg-preview flex items-center justify-center m-4 mb-0 rounded-lg overflow-hidden relative">
+            <div className="flex flex-col items-center gap-3" style={{ color: "#212023" }}>
+              <svg className="w-12 h-12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="3" y="3" width="18" height="18" rx="2" />
+                <circle cx="8.5" cy="8.5" r="1.5" />
+                <path d="M21 15l-5-5L5 21" />
+              </svg>
+              <span className="text-sm">請上傳圖片以開始編輯</span>
+            </div>
+          </div>
+          <div className="h-[120px] max-md:h-[80px] shrink-0 w-full px-3 py-1.5 flex items-center gap-2">
+            <button
+              onClick={() => appendInputRef.current?.click()}
+              className="shrink-0 w-16 h-16 rounded-lg border-2 border-dashed border-white/30 hover:border-highlight/60 bg-white/5 hover:bg-white/10 flex items-center justify-center transition-colors"
+            >
+              <svg className="w-7 h-7" viewBox="0 0 24 24" fill="none">
+                <path d="M12 5v14m-7-7h14" stroke="#D4FF3F" strokeWidth={2.5} strokeLinecap="round" />
+              </svg>
+            </button>
+            <input
+              ref={appendInputRef}
+              type="file"
+              accept="image/png,image/jpeg,image/webp,image/avif,image/heif,image/heic,image/bmp,image/tiff,image/svg+xml,image/x-qoi,image/ico"
+              multiple
+              onChange={handleAppendFiles}
+              className="hidden"
+            />
+          </div>
+        </main>
+        <ConfirmModal
+          open={showResetModal}
+          title="返回首頁"
+          message="確定要放棄目前的編輯內容並返回首頁嗎？"
+          confirmLabel="返回首頁"
+          cancelLabel="繼續編輯"
+          onConfirm={onReset}
+          onCancel={() => setShowResetModal(false)}
+          accent="#d4ff3f"
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="h-[100dvh] flex overflow-hidden bg-sidebar layout-editor">
@@ -785,7 +871,7 @@ export function EditorPage({
 
         {/* 中部: 模式面板 */}
         <div className="flex-1 p-4 pt-2 flex flex-col gap-3">
-          {mode === "preview" && (
+          {mode === "preview" && pipelineState && (
             <CropToolPanel
               onEnterCropMode={handleEnterCropMode}
               onRotateLeft={handleRotateLeft}
@@ -925,7 +1011,7 @@ export function EditorPage({
           <input
             ref={appendInputRef}
             type="file"
-            accept="image/*"
+            accept="image/png,image/jpeg,image/webp,image/avif,image/heif,image/heic,image/bmp,image/tiff,image/svg+xml,image/x-qoi,image/ico"
             multiple
             onChange={handleAppendFiles}
             className="hidden"
@@ -936,10 +1022,10 @@ export function EditorPage({
           )}
 
           {images.map((item) => (
-            <button
+            <div
               key={item.id}
               onClick={() => onSelectImage(item.id)}
-              className={`group relative shrink-0 w-16 h-16 rounded-lg overflow-hidden border-2 transition-colors ${
+              className={`group relative shrink-0 w-16 h-16 rounded-lg overflow-hidden border-2 transition-colors cursor-pointer ${
                 item.id === activeImageId
                   ? "border-highlight"
                   : "border-transparent"
@@ -956,7 +1042,7 @@ export function EditorPage({
               >
                 &times;
               </button>
-            </button>
+            </div>
           ))}
         </div>
       </main>
@@ -999,7 +1085,7 @@ function CropToolPanel({
   flipX: boolean;
   flipY: boolean;
   isExporting: boolean;
-  pipelineState: PipelineState;
+  pipelineState: PipelineState | null;
 }) {
   return (
     <div className="flex flex-col gap-3">
@@ -1010,27 +1096,21 @@ function CropToolPanel({
           <div className="flex justify-between">
             <span>原始尺寸</span>
             <span className="text-white/80">
-              {pipelineState.imageInfo.naturalWidth} x {pipelineState.imageInfo.naturalHeight}
+              {pipelineState ? `${pipelineState.imageInfo.naturalWidth} x ${pipelineState.imageInfo.naturalHeight}` : "-- x --"}
             </span>
           </div>
           <div className="flex justify-between">
             <span>裁切尺寸</span>
             <span className="text-white/80">
-              {Math.round(
-                pipelineState.editorState.cropW /
-                  pipelineState.imageInfo.displayMultiplier,
-              )}{" "}
-              x{" "}
-              {Math.round(
-                pipelineState.editorState.cropH /
-                  pipelineState.imageInfo.displayMultiplier,
-              )}
+              {pipelineState
+                ? `${Math.round(pipelineState.editorState.cropW / pipelineState.imageInfo.displayMultiplier)} x ${Math.round(pipelineState.editorState.cropH / pipelineState.imageInfo.displayMultiplier)}`
+                : "-- x --"}
             </span>
           </div>
           <div className="flex justify-between">
             <span>旋轉</span>
             <span className="text-white/80">
-              {pipelineState.editorState.baseRotate}°
+              {pipelineState ? `${pipelineState.editorState.baseRotate}°` : "0°"}
             </span>
           </div>
         </div>
