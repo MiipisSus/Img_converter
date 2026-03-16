@@ -14,7 +14,7 @@ services:
       context: frontend
       dockerfile: Dockerfile
       args:
-        APP_VERSION: ${APP_VERSION:-dev}
+        APP_VERSION: ${APP_VERSION:-dev-build}
     ports:
       - "127.0.0.1:8080:80"
     depends_on:

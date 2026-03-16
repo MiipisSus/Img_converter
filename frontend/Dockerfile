@@ -9,6 +9,7 @@ COPY package.json package-lock.json ./
 RUN npm ci
 
 COPY . .
+ARG APP_VERSION=dev-build
 RUN VITE_APP_VERSION=$APP_VERSION npm run build
 
 # ── Stage 2: Serve ──
