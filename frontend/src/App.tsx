@@ -5,6 +5,7 @@ import { EditorPage } from "./pages/EditorPage";
 import { ExportPage } from "./pages/ExportPage";
 import { VideoEditorPage } from "./pages/VideoEditorPage";
 import { VideoExportPage } from "./pages/VideoExportPage";
+import { useDocumentMeta } from "./hooks/useDocumentMeta";
 
 import picFavicon from "./assets/pic_favicon.png";
 import vicFavicon from "./assets/vic_favicon.png";
@@ -49,6 +50,14 @@ function App() {
       link.href = mode === "vic" ? vicFavicon : picFavicon;
     }
   }, [mode]);
+
+  // ── 動態更新 document title / meta description ──
+  const pageKey =
+    mode === "upload" ? "upload"
+    : mode === "vic" ? (vicStep === "export" ? "vic-export" : "vic-edit")
+    : currentStep === "export" ? "pic-export"
+    : "pic-edit";
+  useDocumentMeta(pageKey);
 
   // ── 橋接 imageRef ──
   const imageRef = useRef<HTMLImageElement | null>(null);

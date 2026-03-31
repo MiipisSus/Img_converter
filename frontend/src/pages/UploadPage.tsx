@@ -175,17 +175,17 @@ export function UploadPage({ onImagesLoaded, onVideoLoaded }: UploadPageProps) {
     : null;
 
   return (
-    <div className="min-h-[100dvh] bg-sidebar flex flex-col items-center justify-center select-none">
+    <main className="min-h-[100dvh] bg-sidebar flex flex-col items-center justify-center select-none">
       {/* 警告 Toast */}
       {alert && (
-        <div className="fixed top-6 left-1/2 -translate-x-1/2 z-50">
+        <div className="fixed top-6 left-1/2 -translate-x-1/2 z-50" role="alert">
           <div className="flex items-center gap-3 px-5 py-3 rounded-xl bg-red-500/90 text-white text-sm font-medium shadow-lg backdrop-blur">
-            <svg className="w-5 h-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <svg className="w-5 h-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
               <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 3.75h.008v.008H12v-.008Z" />
             </svg>
             <span>{alert}</span>
-            <button onClick={() => setAlert(null)} className="ml-2 hover:text-white/70 transition-colors">
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <button onClick={() => setAlert(null)} className="ml-2 hover:text-white/70 transition-colors" aria-label="關閉警告">
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
                 <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
               </svg>
             </button>
@@ -193,17 +193,19 @@ export function UploadPage({ onImagesLoaded, onVideoLoaded }: UploadPageProps) {
         </div>
       )}
 
-      <div className="flex flex-col items-center gap-6">
+      <section className="flex flex-col items-center gap-6" aria-label="檔案上傳區">
         {/* Logo 區域：拖曳時切換對應 Logo */}
         {isDragging && hintLogo ? (
-          <img src={hintLogo} alt="" className="h-28 transition-all duration-200 scale-110" />
+          <img src={hintLogo} alt="拖曳檔案提示" className="h-28 transition-all duration-200 scale-110" />
         ) : (
           <div className="flex items-center gap-4">
-            <img src={picLogo} alt="picgopic!" className="h-24" />
-            <span className="text-white/20 text-2xl font-light">||</span>
-            <img src={vicLogo} alt="vicgovic!" className="h-24" />
+            <img src={picLogo} alt="Pic — 圖片編輯工具" className="h-24" />
+            <span className="text-white/20 text-2xl font-light" aria-hidden="true">||</span>
+            <img src={vicLogo} alt="Vic — 影片編輯工具" className="h-24" />
           </div>
         )}
+
+        <h1 className="sr-only">Picvic! — 線上圖片壓縮、影片剪裁、格式轉換工具</h1>
 
         {/* 統一拖放區 */}
         <label
@@ -247,6 +249,7 @@ export function UploadPage({ onImagesLoaded, onVideoLoaded }: UploadPageProps) {
                   viewBox="0 0 24 24"
                   stroke="currentColor"
                   strokeWidth={1.5}
+                  aria-hidden="true"
                 >
                   <path
                     strokeLinecap="round"
@@ -281,9 +284,9 @@ export function UploadPage({ onImagesLoaded, onVideoLoaded }: UploadPageProps) {
           onChange={handleFileChange}
           className="hidden"
         />
-      </div>
+      </section>
       {/* 版本號 */}
-      <span className="fixed right-4 bottom-4 text-xs text-white/20 select-none">
+      <span className="fixed right-4 bottom-4 text-xs text-white/20 select-none" aria-hidden="true">
         {__APP_VERSION__}
       </span>
       {/* Buy Me a Coffee */}
@@ -292,6 +295,7 @@ export function UploadPage({ onImagesLoaded, onVideoLoaded }: UploadPageProps) {
         target="_blank"
         rel="noopener noreferrer"
         className="fixed left-4 bottom-4 z-40 px-4 py-2 rounded-lg hover:scale-105 transition-transform"
+        aria-label="Buy Me A Coffee — 贊助作者"
         style={{
           animation: "bmc-color 10s ease-in-out infinite",
         }}
@@ -304,6 +308,6 @@ export function UploadPage({ onImagesLoaded, onVideoLoaded }: UploadPageProps) {
           }
         `}</style>
       </a>
-    </div>
+    </main>
   );
 }

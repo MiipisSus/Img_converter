@@ -934,19 +934,20 @@ export function VideoEditorPage({ video, onExport, onReset, initialState }: Vide
 
   return (
     <div className={`h-[100dvh] flex overflow-hidden bg-sidebar layout-editor${mode === "clip" ? " clip-mode" : ""}`}>
+      <h1 className="sr-only">影片剪裁與編輯 — Picvic!</h1>
       {/* 手機版 Header (Logo) */}
       <header className="hidden max-md:flex items-center justify-center bg-sidebar px-4 py-2">
-        <button onClick={() => setShowResetModal(true)} className="cursor-pointer">
-          <img src={vicLogo} alt="VicgoVic!" className="h-10" />
+        <button onClick={() => setShowResetModal(true)} className="cursor-pointer" aria-label="返回首頁">
+          <img src={vicLogo} alt="Picvic! 影片工具首頁" className="h-10" />
         </button>
       </header>
 
       {/* ── 左側面板 ── */}
-      <aside className="w-[30%] min-w-[240px] max-w-[320px] flex flex-col h-[100dvh] sidebar-scroll overflow-y-auto bg-sidebar max-md:h-auto">
+      <aside className="w-[30%] min-w-[240px] max-w-[320px] flex flex-col h-[100dvh] sidebar-scroll overflow-y-auto bg-sidebar max-md:h-auto" aria-label="影片編輯工具面板">
         {/* Logo (桌面版) */}
         <div className="p-4 pb-2 mx-auto mb-6 max-md:hidden">
-          <button onClick={() => setShowResetModal(true)} className="cursor-pointer">
-            <img src={vicLogo} alt="VicgoVic!" className="h-16" />
+          <button onClick={() => setShowResetModal(true)} className="cursor-pointer" aria-label="返回首頁">
+            <img src={vicLogo} alt="Picvic! 影片工具首頁" className="h-16" />
           </button>
         </div>
 
@@ -1253,7 +1254,7 @@ export function VideoEditorPage({ video, onExport, onReset, initialState }: Vide
                   <span className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-all pointer-events-none ${
                     editMode === "move-video" ? "bg-[#00B4FF] text-white shadow" : "text-white/60"
                   }`}>
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                       <path d="M18 11V6a2 2 0 0 0-2-2a2 2 0 0 0-2 2v1M14 10V4a2 2 0 0 0-2-2a2 2 0 0 0-2 2v6M10 10.5V6a2 2 0 0 0-2-2a2 2 0 0 0-2 2v8" />
                       <path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8H12a8 8 0 0 1-6.3-3.1" />
                     </svg>
@@ -1262,7 +1263,7 @@ export function VideoEditorPage({ video, onExport, onReset, initialState }: Vide
                   <span className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-all pointer-events-none ${
                     editMode === "move-crop" ? "bg-[#00B4FF] text-white shadow" : "text-white/60"
                   }`}>
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                       <path d="M5 3l4 0 0 4M19 3l-4 0 0 4M5 21l4 0 0-4M19 21l-4 0 0-4" />
                       <rect x="7" y="7" width="10" height="10" strokeDasharray="3 3" />
                     </svg>
@@ -1337,8 +1338,9 @@ export function VideoEditorPage({ video, onExport, onReset, initialState }: Vide
                     transition: cropTransition !== "none" ? "left 0.4s cubic-bezier(0.4,0,0.2,1), top 0.4s cubic-bezier(0.4,0,0.2,1)" : "none",
                   }}
                   title={isRatioLocked ? "解鎖比例" : "鎖定比例"}
+                  aria-label={isRatioLocked ? "解鎖裁切比例" : "鎖定裁切比例"}
                 >
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                     {isRatioLocked ? (
                       <>
                         <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
@@ -1379,13 +1381,14 @@ export function VideoEditorPage({ video, onExport, onReset, initialState }: Vide
                     <button
                       onClick={handlePlayPause}
                       className="w-9 h-9 flex items-center justify-center rounded-full bg-[#00B4FF] text-white hover:brightness-110 btn-vic transition-all"
+                      aria-label={isPlaying ? "暫停播放" : "開始播放"}
                     >
                       {isPlaying ? (
-                        <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
+                        <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                           <path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z" />
                         </svg>
                       ) : (
-                        <svg className="w-4 h-4 ml-0.5" viewBox="0 0 24 24" fill="currentColor">
+                        <svg className="w-4 h-4 ml-0.5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                           <path d="M8 5v14l11-7z" />
                         </svg>
                       )}
@@ -1448,7 +1451,7 @@ export function VideoEditorPage({ video, onExport, onReset, initialState }: Vide
           {/* GIF 處理中 / 影片載入中 — 轉圈提示 */}
           {isGifSource && !videoReady && (
             <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/60 z-10">
-              <svg className="w-10 h-10 text-[#00B4FF] animate-spin" viewBox="0 0 24 24" fill="none">
+              <svg className="w-10 h-10 text-[#00B4FF] animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden="true">
                 <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" />
                 <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
               </svg>

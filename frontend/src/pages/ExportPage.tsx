@@ -559,19 +559,20 @@ export function ExportPage({
 
   return (
     <div className="h-[100dvh] flex overflow-hidden bg-sidebar layout-editor">
+      <h1 className="sr-only">圖片壓縮與格式轉換 — Picvic!</h1>
       {/* 手機版 Header (Logo) */}
       <header className="hidden max-md:flex items-center justify-center bg-sidebar px-4 py-2">
-        <button onClick={() => setShowResetModal(true)} className="cursor-pointer">
-          <img src={logoImg} alt="picgopic!" className="h-10" />
+        <button onClick={() => setShowResetModal(true)} className="cursor-pointer" aria-label="返回首頁">
+          <img src={logoImg} alt="Picvic! 首頁" className="h-10" />
         </button>
       </header>
 
       {/* ===== 左側 Sidebar ===== */}
-      <aside className="w-[30%] min-w-[240px] max-w-[320px] flex flex-col h-[100dvh] sticky top-0 sidebar-scroll overflow-y-auto bg-sidebar max-md:h-auto">
+      <aside className="w-[30%] min-w-[240px] max-w-[320px] flex flex-col h-[100dvh] sticky top-0 sidebar-scroll overflow-y-auto bg-sidebar max-md:h-auto" aria-label="輸出設定面板">
         {/* 頂部: 標題 (桌面版) */}
         <div className="p-4 pb-2 mx-auto mb-6 max-md:hidden">
-          <button onClick={() => setShowResetModal(true)} className="cursor-pointer">
-            <img src={logoImg} alt="picgopic!" className="h-16" />
+          <button onClick={() => setShowResetModal(true)} className="cursor-pointer" aria-label="返回首頁">
+            <img src={logoImg} alt="Picvic! 首頁" className="h-16" />
           </button>
         </div>
 
@@ -671,16 +672,17 @@ export function ExportPage({
                   <img
                     src={item.pipelineState.previewUrl ?? item.src}
                     className="w-full h-full object-cover"
-                    alt=""
+                    alt="圖片縮圖"
                   />
                   {unifiedOutput && item.id !== activeImageId && (
-                    <div className="absolute top-0.5 right-0.5 bg-black/50 rounded-full p-0.5">
+                    <div className="absolute top-0.5 right-0.5 bg-black/50 rounded-full p-0.5" aria-label="已套用統一設定">
                       <svg
                         className="w-3.5 h-3.5"
                         viewBox="0 0 24 24"
                         fill="none"
                         stroke="#D4FF3F"
                         strokeWidth={2.5}
+                        aria-hidden="true"
                       >
                         <path
                           strokeLinecap="round"

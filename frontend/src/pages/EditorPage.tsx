@@ -768,15 +768,16 @@ export function EditorPage({
   if (!hasImage || !pipelineState || !currentImageData) {
     return (
       <div className="h-[100dvh] flex overflow-hidden bg-sidebar layout-editor">
+        <h1 className="sr-only">圖片裁切與編輯 — Picvic!</h1>
         <header className="hidden max-md:flex items-center justify-center bg-sidebar px-4 py-2">
-          <button onClick={() => setShowResetModal(true)} className="cursor-pointer">
-            <img src={logoImg} alt="picgopic!" className="h-10" />
+          <button onClick={() => setShowResetModal(true)} className="cursor-pointer" aria-label="返回首頁">
+            <img src={logoImg} alt="Picvic! 首頁" className="h-10" />
           </button>
         </header>
-        <aside className="w-[30%] min-w-[240px] max-w-[320px] flex flex-col h-[100dvh] sticky top-0 bg-sidebar max-md:h-auto">
+        <aside className="w-[30%] min-w-[240px] max-w-[320px] flex flex-col h-[100dvh] sticky top-0 bg-sidebar max-md:h-auto" aria-label="編輯工具面板">
           <div className="p-4 pb-2 mx-auto mb-6 max-md:hidden">
-            <button onClick={() => setShowResetModal(true)} className="cursor-pointer">
-              <img src={logoImg} alt="picgopic!" className="h-16" />
+            <button onClick={() => setShowResetModal(true)} className="cursor-pointer" aria-label="返回首頁">
+              <img src={logoImg} alt="Picvic! 首頁" className="h-16" />
             </button>
           </div>
           <div className="flex-1 p-4 pt-2 flex flex-col gap-3 opacity-30 pointer-events-none">
@@ -810,7 +811,7 @@ export function EditorPage({
         <main className="flex-1 flex flex-col h-[100dvh]">
           <div className="flex-1 bg-preview flex items-center justify-center m-4 mb-0 rounded-lg overflow-hidden relative">
             <div className="flex flex-col items-center gap-3" style={{ color: "#212023" }}>
-              <svg className="w-12 h-12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+              <svg className="w-12 h-12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                 <rect x="3" y="3" width="18" height="18" rx="2" />
                 <circle cx="8.5" cy="8.5" r="1.5" />
                 <path d="M21 15l-5-5L5 21" />
@@ -822,8 +823,9 @@ export function EditorPage({
             <button
               onClick={() => appendInputRef.current?.click()}
               className="shrink-0 w-16 h-16 rounded-lg border-2 border-dashed border-white/30 hover:border-highlight/60 bg-white/5 hover:bg-white/10 flex items-center justify-center transition-colors"
+              aria-label="追加圖片"
             >
-              <svg className="w-7 h-7" viewBox="0 0 24 24" fill="none">
+              <svg className="w-7 h-7" viewBox="0 0 24 24" fill="none" aria-hidden="true">
                 <path d="M12 5v14m-7-7h14" stroke="#D4FF3F" strokeWidth={2.5} strokeLinecap="round" />
               </svg>
             </button>
@@ -853,19 +855,20 @@ export function EditorPage({
 
   return (
     <div className="h-[100dvh] flex overflow-hidden bg-sidebar layout-editor">
+      <h1 className="sr-only">圖片裁切與編輯 — Picvic!</h1>
       {/* 手機版 Header (Logo) */}
       <header className="hidden max-md:flex items-center justify-center bg-sidebar px-4 py-2">
-        <button onClick={() => setShowResetModal(true)} className="cursor-pointer">
-          <img src={logoImg} alt="picgopic!" className="h-10" />
+        <button onClick={() => setShowResetModal(true)} className="cursor-pointer" aria-label="返回首頁">
+          <img src={logoImg} alt="Picvic! 首頁" className="h-10" />
         </button>
       </header>
 
       {/* ===== 左側 Sidebar ===== */}
-      <aside className="w-[30%] min-w-[240px] max-w-[320px] flex flex-col h-[100dvh] sticky top-0 sidebar-scroll overflow-y-auto bg-sidebar max-md:h-auto">
+      <aside className="w-[30%] min-w-[240px] max-w-[320px] flex flex-col h-[100dvh] sticky top-0 sidebar-scroll overflow-y-auto bg-sidebar max-md:h-auto" aria-label="編輯工具面板">
         {/* 頂部: 標題 (桌面版) */}
         <div className="p-4 pb-2 mx-auto mb-6 max-md:hidden">
-          <button onClick={() => setShowResetModal(true)} className="cursor-pointer">
-            <img src={logoImg} alt="picgopic!" className="h-16" />
+          <button onClick={() => setShowResetModal(true)} className="cursor-pointer" aria-label="返回首頁">
+            <img src={logoImg} alt="Picvic! 首頁" className="h-16" />
           </button>
         </div>
 
@@ -973,7 +976,7 @@ export function EditorPage({
               <span className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-all pointer-events-none ${
                 imgEditMode === "move-image" ? "bg-highlight text-black shadow" : "text-white/60"
               }`}>
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                   <path d="M18 11V6a2 2 0 0 0-2-2a2 2 0 0 0-2 2v1M14 10V4a2 2 0 0 0-2-2a2 2 0 0 0-2 2v6M10 10.5V6a2 2 0 0 0-2-2a2 2 0 0 0-2 2v8" />
                   <path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8H12a8 8 0 0 1-6.3-3.1" />
                 </svg>
@@ -982,7 +985,7 @@ export function EditorPage({
               <span className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-all pointer-events-none ${
                 imgEditMode === "move-crop" ? "bg-highlight text-black shadow" : "text-white/60"
               }`}>
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                   <path d="M5 3l4 0 0 4M19 3l-4 0 0 4M5 21l4 0 0-4M19 21l-4 0 0-4" />
                   <rect x="7" y="7" width="10" height="10" strokeDasharray="3 3" />
                 </svg>
@@ -998,8 +1001,9 @@ export function EditorPage({
           <button
             onClick={() => appendInputRef.current?.click()}
             className="shrink-0 w-16 h-16 rounded-lg border-2 border-dashed border-white/30 hover:border-highlight/60 bg-white/5 hover:bg-white/10 flex items-center justify-center transition-colors"
+            aria-label="追加圖片"
           >
-            <svg className="w-7 h-7" viewBox="0 0 24 24" fill="none">
+            <svg className="w-7 h-7" viewBox="0 0 24 24" fill="none" aria-hidden="true">
               <path
                 d="M12 5v14m-7-7h14"
                 stroke="#D4FF3F"
@@ -1039,6 +1043,7 @@ export function EditorPage({
               <button
                 onClick={(e) => { e.stopPropagation(); onRemoveImage(item.id); }}
                 className="absolute top-0 right-0 w-5 h-5 flex items-center justify-center bg-black/70 text-white/80 text-xs rounded-bl-md thumb-remove"
+                aria-label="移除此圖片"
               >
                 &times;
               </button>

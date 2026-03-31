@@ -44,8 +44,13 @@ export function ConfirmModal({
         if (e.target === overlayRef.current) onCancel();
       }}
     >
-      <div className="bg-[#1e1e1e] border border-white/10 rounded-2xl p-6 w-[320px] shadow-2xl flex flex-col gap-4">
-        <h3 className="text-base font-bold text-white">{title}</h3>
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="confirm-modal-title"
+        className="bg-[#1e1e1e] border border-white/10 rounded-2xl p-6 w-[320px] shadow-2xl flex flex-col gap-4"
+      >
+        <h3 id="confirm-modal-title" className="text-base font-bold text-white">{title}</h3>
         <p className="text-sm text-white/60 leading-relaxed">{message}</p>
         <div className="flex gap-2 mt-2">
           <button

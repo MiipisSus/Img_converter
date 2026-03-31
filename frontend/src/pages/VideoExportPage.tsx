@@ -649,19 +649,20 @@ export function VideoExportPage({
   // ── 永遠渲染完整佈局 (不因 loading 而 early return) ──
   return (
     <div className="h-[100dvh] flex overflow-hidden bg-sidebar layout-editor">
+      <h1 className="sr-only">影片壓縮與匯出 — Picvic!</h1>
       {/* 手機版 Header (Logo) */}
       <header className="hidden max-md:flex items-center justify-center bg-sidebar px-4 py-2">
-        <button onClick={() => setShowResetModal(true)} className="cursor-pointer">
-          <img src={vicLogo} alt="VicgoVic!" className="h-10" />
+        <button onClick={() => setShowResetModal(true)} className="cursor-pointer" aria-label="返回首頁">
+          <img src={vicLogo} alt="Picvic! 影片工具首頁" className="h-10" />
         </button>
       </header>
 
       {/* ===== 左側設定面板 ===== */}
-      <aside className="w-[30%] min-w-[240px] max-w-[320px] flex flex-col h-[100dvh] sidebar-scroll overflow-y-auto bg-sidebar max-md:h-auto">
+      <aside className="w-[30%] min-w-[240px] max-w-[320px] flex flex-col h-[100dvh] sidebar-scroll overflow-y-auto bg-sidebar max-md:h-auto" aria-label="影片匯出設定面板">
         {/* Logo (桌面版) */}
         <div className="p-4 pb-2 mx-auto mb-6 max-md:hidden">
-          <button onClick={() => setShowResetModal(true)} className="cursor-pointer">
-            <img src={vicLogo} alt="VicgoVic!" className="h-16" />
+          <button onClick={() => setShowResetModal(true)} className="cursor-pointer" aria-label="返回首頁">
+            <img src={vicLogo} alt="Picvic! 影片工具首頁" className="h-16" />
           </button>
         </div>
 
@@ -883,7 +884,7 @@ export function VideoExportPage({
                 {/* 目標大於原片警告 */}
                 {targetKB !== null && estimatedSizeKB > 0 && targetKB > estimatedSizeKB && (
                   <div className="flex items-start gap-2 mt-2 p-2 bg-yellow-500/10 border border-yellow-500/30 rounded-lg">
-                    <svg className="w-4 h-4 text-yellow-400 shrink-0 mt-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                    <svg className="w-4 h-4 text-yellow-400 shrink-0 mt-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} aria-hidden="true">
                       <path d="M12 9v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                     </svg>
                     <span className="text-xs text-yellow-300">
@@ -923,7 +924,7 @@ export function VideoExportPage({
 
                     {qualityTier === "danger" && (
                       <div className="flex items-start gap-2 mt-1 p-2 bg-red-500/10 border border-red-500/30 rounded-lg">
-                        <svg className="w-4 h-4 text-red-400 shrink-0 mt-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                        <svg className="w-4 h-4 text-red-400 shrink-0 mt-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} aria-hidden="true">
                           <path d="M12 9v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                         </svg>
                         <span className="text-xs text-red-300">
@@ -1200,7 +1201,7 @@ export function VideoExportPage({
               ) : (
                 <div className="flex flex-col items-center gap-4 text-center">
                   <div className="w-16 h-16 rounded-full bg-[#00B4FF]/20 flex items-center justify-center">
-                    <svg className="w-8 h-8 text-[#00B4FF]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                    <svg className="w-8 h-8 text-[#00B4FF]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} aria-hidden="true">
                       <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
                     </svg>
                   </div>
